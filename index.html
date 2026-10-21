@@ -1,0 +1,2115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>RUBICEzy — paint your cube, watch it solve</title>
+<meta name="description" content="An interactive 3D Rubik's Cube solver. Paint the colours off your real cube, then follow an animated, step-by-step solution.">
+<style>
+/* ============================================================
+   RUBICEzy — design tokens
+   Palette: indigo-graphite chassis, chrome-cyan interaction,
+   and the cube's own six colours as the only decorative colour.
+   ============================================================ */
+:root{
+  --void:#07080d;
+  --slab:#0d1120;
+  --slab-2:#131a2d;
+  --slab-3:#1a2238;
+  --edge:#232b40;
+  --edge-hot:#33405e;
+  --steel:#b3bccf;
+  --steel-dim:#717d9c;
+  --steel-faint:#4b5570;
+  --ice:#6ff0ff;
+  --ice-deep:#0e7f99;
+
+  --c0:#ffd21f; /* Up    — yellow */
+  --c1:#17d47c; /* Right — green  */
+  --c2:#ff3355; /* Front — red    */
+  --c3:#eef3ff; /* Down  — white  */
+  --c4:#2f7bff; /* Left  — blue   */
+  --c5:#ff8a1f; /* Back  — orange */
+
+  --r-s:6px; --r-m:12px; --r-l:20px;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+  --shadow:0 24px 60px -30px rgba(0,0,0,.9);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  background:var(--void); color:var(--steel);
+  font-family:var(--sans); font-size:14px; line-height:1.55;
+  -webkit-font-smoothing:antialiased; overflow:hidden;
+  overscroll-behavior:none;
+}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+button:disabled{cursor:not-allowed}
+:focus-visible{outline:2px solid var(--ice);outline-offset:2px;border-radius:4px}
+
+/* ---------- ambient backdrop ---------- */
+.backdrop{position:fixed;inset:0;z-index:0;pointer-events:none;overflow:hidden}
+.orb{position:absolute;border-radius:50%;filter:blur(90px);opacity:.4}
+.orb.a{width:52vw;height:52vw;left:-14vw;top:-16vw;background:radial-gradient(circle,#0f5f8f,transparent 68%)}
+.orb.b{width:46vw;height:46vw;right:-12vw;bottom:-18vw;background:radial-gradient(circle,#7a1246,transparent 68%)}
+.orb.c{width:34vw;height:34vw;left:38vw;bottom:-14vw;background:radial-gradient(circle,#3a2b8f,transparent 70%)}
+.grid-lines{position:absolute;inset:0;opacity:.16;
+  background-image:linear-gradient(var(--edge) 1px,transparent 1px),linear-gradient(90deg,var(--edge) 1px,transparent 1px);
+  background-size:64px 64px;
+  mask-image:radial-gradient(ellipse 70% 60% at 50% 45%,#000 25%,transparent 78%);
+  -webkit-mask-image:radial-gradient(ellipse 70% 60% at 50% 45%,#000 25%,transparent 78%)}
+
+/* ---------- shell ---------- */
+.shell{position:relative;z-index:1;height:100%;display:grid;grid-template-rows:auto 1fr}
+
+header{
+  display:flex;align-items:center;gap:18px;
+  padding:12px 20px;border-bottom:1px solid var(--edge);
+  background:linear-gradient(180deg,rgba(13,17,32,.9),rgba(7,8,13,.5));
+  backdrop-filter:blur(14px);
+}
+.brand{display:flex;align-items:baseline;gap:12px;min-width:0}
+.wordmark{
+  font-size:23px;font-weight:800;letter-spacing:-.045em;color:#fff;white-space:nowrap;
+}
+.wordmark i{font-style:normal;color:var(--ice);text-shadow:0 0 22px rgba(111,240,255,.55)}
+.strap{font-size:12.5px;color:var(--steel-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.head-right{margin-left:auto;display:flex;align-items:center;gap:10px}
+
+.chip{
+  display:inline-flex;align-items:center;gap:7px;
+  padding:5px 11px;border:1px solid var(--edge);border-radius:999px;
+  font-size:11.5px;color:var(--steel-dim);background:rgba(19,26,45,.7);white-space:nowrap;
+}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--steel-faint);flex:none}
+.dot.live{background:var(--ice);box-shadow:0 0 10px var(--ice);animation:breathe 1.9s ease-in-out infinite}
+.dot.bad{background:var(--c2);box-shadow:0 0 10px var(--c2)}
+.dot.ok{background:var(--c1);box-shadow:0 0 10px var(--c1)}
+@keyframes breathe{0%,100%{opacity:.35}50%{opacity:1}}
+
+main{display:grid;grid-template-columns:330px minmax(0,1fr) 356px;min-height:0}
+
+.rail{
+  min-height:0;overflow-y:auto;overscroll-behavior:contain;
+  padding:18px;display:flex;flex-direction:column;gap:16px;
+  background:linear-gradient(180deg,rgba(13,17,32,.72),rgba(7,8,13,.72));
+}
+.rail.left{border-right:1px solid var(--edge)}
+.rail.right{border-left:1px solid var(--edge)}
+.rail::-webkit-scrollbar{width:9px}
+.rail::-webkit-scrollbar-thumb{background:var(--edge-hot);border-radius:9px;border:3px solid transparent;background-clip:content-box}
+
+.card{border:1px solid var(--edge);border-radius:var(--r-l);background:rgba(19,26,45,.55);padding:16px}
+.card h2{font-size:15px;font-weight:700;color:#e9eef8;letter-spacing:-.01em;margin-bottom:6px}
+.card p{font-size:13px;color:var(--steel-dim)}
+.card p + p{margin-top:8px}
+.hr{height:1px;background:var(--edge);margin:14px -16px}
+
+/* ---------- buttons ---------- */
+.btn{
+  display:flex;align-items:center;justify-content:center;gap:9px;width:100%;
+  padding:13px 16px;border-radius:14px;font-size:14px;font-weight:650;
+  border:1px solid var(--edge-hot);background:var(--slab-2);color:#dce4f3;
+  transition:transform .12s ease,border-color .18s ease,background .18s ease,box-shadow .18s ease;
+}
+.btn:hover:not(:disabled){border-color:var(--ice-deep);background:var(--slab-3)}
+.btn:active:not(:disabled){transform:translateY(1px)}
+.btn:disabled{opacity:.4}
+.btn.primary{
+  border:none;color:#04141a;font-weight:800;letter-spacing:.005em;
+  background:linear-gradient(112deg,#8dfaff,#43d4f5 46%,#5b8dff);
+  box-shadow:0 12px 34px -14px rgba(80,200,255,.75),inset 0 1px 0 rgba(255,255,255,.55);
+}
+.btn.primary:hover:not(:disabled){box-shadow:0 16px 42px -12px rgba(80,200,255,.95)}
+.btn.danger{border-color:#5d2436;color:#ffb9c6}
+.btn.danger:hover{background:#2a1220;border-color:#8f2f4a}
+.btn.sm{padding:9px 12px;font-size:12.5px;border-radius:11px;font-weight:600}
+.btn-row{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.btn-row.three{grid-template-columns:repeat(3,1fr)}
+
+/* ---------- palette ---------- */
+.swatches{display:grid;grid-template-columns:repeat(3,1fr);gap:9px}
+.sw{
+  position:relative;border:1px solid var(--edge);border-radius:14px;padding:9px 8px 8px;
+  background:var(--slab-2);text-align:left;transition:border-color .15s,transform .1s,background .15s;
+}
+.sw:hover:not(:disabled){border-color:var(--edge-hot)}
+.sw[aria-pressed="true"]{border-color:var(--ice);background:#101c2c;box-shadow:0 0 0 1px var(--ice),0 10px 26px -14px rgba(111,240,255,.7)}
+.sw:disabled{opacity:.32}
+.sw .puck{height:26px;border-radius:8px;box-shadow:inset 0 -2px 6px rgba(0,0,0,.35),inset 0 1px 0 rgba(255,255,255,.4)}
+.sw .lbl{display:block;margin-top:7px;font-size:11px;color:var(--steel-dim)}
+.sw .cnt{display:block;font-family:var(--mono);font-size:15px;font-weight:600;color:#e9eef8;letter-spacing:-.02em}
+.sw.eraser .puck{background:repeating-linear-gradient(45deg,#2b344c 0 6px,#1a2135 6px 12px)}
+
+.meter{height:6px;border-radius:99px;background:var(--slab-3);overflow:hidden;margin-top:12px}
+.meter i{display:block;height:100%;width:0;border-radius:99px;background:linear-gradient(90deg,var(--ice),#5b8dff);transition:width .3s ease}
+.meter-cap{display:flex;justify-content:space-between;font-size:11.5px;color:var(--steel-dim);margin-top:7px}
+.meter-cap b{font-family:var(--mono);color:#e9eef8;font-weight:600}
+
+.issues{list-style:none;display:flex;flex-direction:column;gap:7px;margin-top:12px}
+.issues li{
+  display:flex;gap:9px;font-size:12.5px;line-height:1.45;color:#ffc4cf;
+  background:rgba(255,51,85,.08);border:1px solid rgba(255,51,85,.28);
+  border-radius:10px;padding:8px 10px;
+}
+.issues li.good{color:#a6f5cf;background:rgba(23,212,124,.08);border-color:rgba(23,212,124,.3)}
+.issues li span{flex:none;font-weight:700}
+
+/* ---------- stage ---------- */
+.stage{position:relative;min-width:0;min-height:0}
+#gl{display:block;width:100%;height:100%;touch-action:none;cursor:grab}
+#gl.grabbing{cursor:grabbing}
+#gl.picking{cursor:crosshair}
+
+.hud{position:absolute;inset:0;pointer-events:none;display:flex;flex-direction:column;padding:16px}
+.hud > *{pointer-events:auto}
+.hud-top{display:flex;gap:9px;align-items:flex-start;flex-wrap:wrap}
+.hud-bottom{margin-top:auto;display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap}
+
+.movecard{
+  border:1px solid var(--edge-hot);border-radius:16px;background:rgba(9,12,22,.82);
+  backdrop-filter:blur(12px);padding:12px 16px;min-width:238px;
+  box-shadow:var(--shadow);
+}
+.movecard .row1{display:flex;align-items:center;gap:12px}
+.glyph{
+  font-family:var(--mono);font-size:30px;font-weight:600;letter-spacing:-.03em;color:#fff;
+  min-width:62px;text-shadow:0 0 26px rgba(111,240,255,.5)
+}
+.movecard .say{font-size:12.5px;color:var(--steel-dim);line-height:1.4}
+.movecard .say b{color:#dce4f3;font-weight:650}
+.turn-ico{width:34px;height:34px;flex:none;color:var(--ice)}
+
+.viewbtns{display:flex;gap:8px}
+.icobtn{
+  width:38px;height:38px;display:grid;place-items:center;border-radius:12px;
+  border:1px solid var(--edge);background:rgba(9,12,22,.8);backdrop-filter:blur(10px);color:var(--steel);
+}
+.icobtn:hover{border-color:var(--ice-deep);color:#fff}
+.icobtn[aria-pressed="true"]{border-color:var(--ice);color:var(--ice)}
+.icobtn:disabled{opacity:.32}
+.icobtn:disabled:hover{border-color:var(--edge);color:var(--steel)}
+.icobtn svg{width:19px;height:19px}
+
+.tip{
+  border:1px solid var(--edge);border-radius:14px;background:rgba(9,12,22,.8);
+  backdrop-filter:blur(10px);padding:9px 13px;font-size:12.5px;color:var(--steel-dim);max-width:min(420px,58vw)
+}
+.tip kbd{
+  font-family:var(--mono);font-size:11px;background:var(--slab-3);border:1px solid var(--edge-hot);
+  border-radius:5px;padding:1px 5px;color:#dce4f3
+}
+
+.flash{
+  position:absolute;inset:0;display:grid;place-items:center;pointer-events:none;opacity:0;
+  transition:opacity .35s ease
+}
+.flash.on{opacity:1}
+.flash div{
+  font-size:min(9vw,74px);font-weight:800;letter-spacing:-.05em;color:#fff;
+  text-shadow:0 0 60px rgba(111,240,255,.9),0 0 140px rgba(91,141,255,.7)
+}
+
+/* ---------- 2D net ---------- */
+.net{display:grid;grid-template-columns:repeat(12,1fr);grid-template-rows:repeat(9,1fr);gap:2px;aspect-ratio:12/9}
+.cell{
+  border-radius:3px;background:#1b2135;border:1px solid rgba(255,255,255,.05);
+  position:relative;transition:transform .1s ease,box-shadow .15s ease;
+}
+.cell.paintable{cursor:pointer}
+.cell.paintable:hover{transform:scale(1.14);z-index:2;box-shadow:0 0 0 2px var(--ice)}
+.cell.locked::after{
+  content:"";position:absolute;inset:0;border-radius:3px;
+  background:radial-gradient(circle at 50% 50%,rgba(0,0,0,.45) 0 22%,transparent 24%)
+}
+.cell.empty{background:repeating-linear-gradient(45deg,#20283d 0 4px,#171d2e 4px 8px)}
+.cell.flagged{animation:flag 1s ease-in-out infinite;z-index:3}
+@keyframes flag{0%,100%{box-shadow:0 0 0 2px rgba(255,51,85,.9)}50%{box-shadow:0 0 0 4px rgba(255,51,85,.25)}}
+.netkey{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:12px;font-size:11px;color:var(--steel-dim)}
+.netkey i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:6px;vertical-align:-1px}
+
+/* ---------- steps / phases ---------- */
+.phase{border:1px solid var(--edge);border-radius:16px;overflow:hidden;background:rgba(19,26,45,.42)}
+.phase + .phase{margin-top:10px}
+.phase.active{border-color:var(--ice-deep);background:rgba(16,28,44,.72)}
+.phase.done .pnum{background:var(--c1);color:#04140c;border-color:transparent}
+.phead{display:flex;align-items:center;gap:11px;width:100%;padding:11px 13px;text-align:left}
+.phead:hover{background:rgba(111,240,255,.05)}
+.pnum{
+  width:24px;height:24px;flex:none;border-radius:8px;border:1px solid var(--edge-hot);
+  display:grid;place-items:center;font-family:var(--mono);font-size:12px;color:var(--steel-dim);background:var(--slab-2)
+}
+.phase.active .pnum{border-color:var(--ice);color:var(--ice)}
+.ptitle{font-size:13.5px;font-weight:650;color:#e2e9f6;flex:1;min-width:0}
+.pcount{font-family:var(--mono);font-size:11.5px;color:var(--steel-faint)}
+.pbody{padding:0 13px 13px;display:none}
+.phase.open .pbody{display:block}
+.pgoal{font-size:12.5px;color:var(--steel-dim);margin-bottom:10px}
+.palg{
+  font-family:var(--mono);font-size:12px;color:#bfe9f5;background:#0b1524;
+  border:1px solid #1d3548;border-radius:9px;padding:7px 9px;margin-bottom:11px;word-break:break-word
+}
+.chips{display:flex;flex-wrap:wrap;gap:5px}
+.mchip{
+  font-family:var(--mono);font-size:12px;font-weight:600;padding:5px 8px;border-radius:8px;
+  border:1px solid var(--edge-hot);background:var(--slab-2);color:#c8d3e8;min-width:34px;text-align:center;
+  transition:all .12s ease
+}
+.mchip:hover{border-color:var(--ice-deep);color:#fff}
+.mchip.past{opacity:.4}
+.mchip.next{border-color:var(--ice);color:#04141a;background:linear-gradient(112deg,#8dfaff,#43d4f5);font-weight:800}
+
+.transport{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.transport .icobtn{width:100%;height:44px;background:var(--slab-2)}
+.speed{display:flex;align-items:center;gap:10px;margin-top:12px;font-size:12px;color:var(--steel-dim)}
+.speed input{flex:1;accent-color:var(--ice)}
+
+.movepad{display:grid;grid-template-columns:repeat(6,1fr);gap:6px}
+.movepad button{
+  font-family:var(--mono);font-size:13px;font-weight:600;padding:10px 0;border-radius:10px;
+  border:1px solid var(--edge-hot);background:var(--slab-2);color:#c8d3e8
+}
+.movepad button:hover{border-color:var(--ice-deep);color:#fff}
+
+.stat{display:flex;justify-content:space-between;font-size:12.5px;padding:6px 0;border-bottom:1px dashed var(--edge)}
+.stat:last-child{border-bottom:none}
+.stat b{font-family:var(--mono);color:#e9eef8;font-weight:600}
+
+/* ---------- modal ---------- */
+.veil{
+  position:fixed;inset:0;z-index:40;background:rgba(4,6,12,.78);backdrop-filter:blur(8px);
+  display:none;place-items:center;padding:22px
+}
+.veil.on{display:grid}
+.sheet{
+  width:min(740px,100%);max-height:86vh;overflow-y:auto;border:1px solid var(--edge-hot);
+  border-radius:22px;background:linear-gradient(180deg,#111729,#0a0e1b);padding:26px;box-shadow:var(--shadow)
+}
+.sheet h2{font-size:22px;font-weight:800;letter-spacing:-.03em;color:#fff;margin-bottom:4px}
+.sheet h3{font-size:14px;font-weight:700;color:#dfe7f5;margin:20px 0 6px}
+.sheet p,.sheet li{font-size:13.5px;color:var(--steel-dim);line-height:1.65}
+.sheet ul{padding-left:19px;display:flex;flex-direction:column;gap:5px}
+.sheet code{font-family:var(--mono);font-size:12.5px;color:#bfe9f5;background:#0b1524;border:1px solid #1d3548;border-radius:5px;padding:1px 5px}
+.sheet .close{position:sticky;top:0;float:right;font-size:20px;color:var(--steel-dim);line-height:1}
+.eq{font-family:var(--mono);font-size:12.5px;color:#cfe6f2;background:#0a1320;border:1px solid #1c3346;border-radius:10px;padding:11px 13px;margin:9px 0;overflow-x:auto}
+
+.hidden{display:none !important}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+
+/* ---------- responsive ---------- */
+@media (max-width:1180px){
+  body{overflow:auto}
+  .shell{height:auto;min-height:100%}
+  main{grid-template-columns:1fr}
+  .stage{height:58vh;min-height:340px;order:-1;position:sticky;top:0;z-index:5;background:var(--void);
+    border-bottom:1px solid var(--edge)}
+  .rail{max-height:none;overflow:visible}
+  .rail.left{border-right:none}
+  .rail.right{border-left:none;border-top:1px solid var(--edge)}
+  .strap{display:none}
+}
+@media (max-width:520px){
+  header{padding:10px 14px}
+  .rail{padding:14px}
+  .movecard{min-width:0}
+  .glyph{font-size:24px;min-width:50px}
+}
+@media (prefers-reduced-motion:reduce){
+  *{animation-duration:.001ms !important;transition-duration:.001ms !important}
+}
+</style>
+</head>
+<body>
+
+<div class="backdrop" aria-hidden="true">
+  <div class="orb a"></div><div class="orb b"></div><div class="orb c"></div>
+  <div class="grid-lines"></div>
+</div>
+
+<div class="shell">
+
+  <header>
+    <div class="brand">
+      <div class="wordmark">RUBIC<i>Ezy</i></div>
+      <div class="strap">Paint your real cube into the browser. Watch it solve, one turn at a time.</div>
+    </div>
+    <div class="head-right">
+      <span class="chip" id="engineChip"><span class="dot live"></span><span id="engineText">verifying engine…</span></span>
+      <button class="btn sm" id="btnAbout" style="width:auto">Engine &amp; maths</button>
+    </div>
+  </header>
+
+  <main>
+    <!-- ============ LEFT RAIL ============ -->
+    <aside class="rail left">
+
+      <!-- intro -->
+      <section id="secIntro">
+        <div class="card">
+          <h2>Start with a solved cube</h2>
+          <p>The cube on the right is solved and yours to spin — drag it anywhere, scroll to zoom.</p>
+          <p>When you press start, every colour drains out and the cube turns to bare metal. Then you paint your own scrambled cube onto it, sticker by sticker, and RUBICEzy works out the turns.</p>
+          <div class="hr"></div>
+          <button class="btn primary" id="btnStart">Start — drain the colours</button>
+          <div style="height:9px"></div>
+          <div class="btn-row">
+            <button class="btn sm" id="btnRandomJump">Use a random scramble</button>
+            <button class="btn sm" id="btnFree">Free play</button>
+          </div>
+        </div>
+        <div class="card" style="margin-top:16px">
+          <h2>How the solve is taught</h2>
+          <p>Eight phases, beginner's layer-by-layer. Every turn is one you could do by hand on a real cube, and each phase names the algorithm it uses so you learn the pattern rather than copy 120 arrows.</p>
+        </div>
+      </section>
+
+      <!-- paint -->
+      <section id="secPaint" class="hidden">
+        <div class="card">
+          <h2>Pick a colour, tap a sticker</h2>
+          <p>Tap stickers on the metal cube or on the flat map. Each colour runs out at nine — the six centres are already fixed, so eight of each are left to place.</p>
+          <div style="height:14px"></div>
+          <div class="swatches" id="swatches"></div>
+          <div class="meter"><i id="meterFill"></i></div>
+          <div class="meter-cap"><span>Stickers placed</span><span><b id="placedCount">6</b> / 54</span></div>
+          <ul class="issues" id="issues"></ul>
+        </div>
+        <div class="card" style="margin-top:16px">
+          <button class="btn primary" id="btnSolve" disabled>Solve this cube</button>
+          <div style="height:9px"></div>
+          <div class="btn-row three">
+            <button class="btn sm" id="btnFillRandom">Random</button>
+            <button class="btn sm" id="btnClear">Clear</button>
+            <button class="btn sm" id="btnBack">Back</button>
+          </div>
+          <div class="hr"></div>
+          <p style="font-size:12.5px;color:var(--steel-dim)">Hold your real cube with white on the bottom and red facing you — that matches the fixed centres here.</p>
+        </div>
+      </section>
+
+      <!-- solve -->
+      <section id="secSolve" class="hidden">
+        <div class="card">
+          <h2 id="solveHead">Solution ready</h2>
+          <p id="solveSub">—</p>
+          <div style="height:14px"></div>
+          <div class="transport">
+            <button class="icobtn" id="btnFirst" title="Back to the start (Home)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 18 8 12l10-6z"/><path d="M6 5v14"/></svg></button>
+            <button class="icobtn" id="btnPrev" title="Previous turn (←)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15 18 7 12l8-6z"/></svg></button>
+            <button class="icobtn" id="btnPlay" title="Play (Space)"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></button>
+            <button class="icobtn" id="btnNext" title="Next turn (→)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 6l8 6-8 6z"/></svg></button>
+          </div>
+          <div class="speed">
+            <span>Speed</span><input type="range" id="speed" min="1" max="10" value="6"><span id="speedTxt" style="font-family:var(--mono);min-width:34px;text-align:right">1.0×</span>
+          </div>
+          <div class="meter"><i id="solveFill"></i></div>
+          <div class="meter-cap"><span>Turns played</span><span><b id="turnCount">0</b> / <span id="turnTotal">0</span></span></div>
+        </div>
+        <div class="card" style="margin-top:16px">
+          <div class="stat"><span>Method</span><b>Layer&nbsp;by&nbsp;layer</b></div>
+          <div class="stat"><span>Total turns</span><b id="statTurns">0</b></div>
+          <div class="stat"><span>Search time</span><b id="statTime">0 ms</b></div>
+          <div class="stat"><span>Verified</span><b id="statVerify">yes</b></div>
+          <div class="hr"></div>
+          <div class="btn-row">
+            <button class="btn sm" id="btnEdit">Edit cube</button>
+            <button class="btn sm" id="btnRestartAll">New cube</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- free play -->
+      <section id="secFree" class="hidden">
+        <div class="card">
+          <h2>Free play</h2>
+          <p>Turn the faces yourself. Keys work too: <kbd>u r f d l b</kbd>, hold <kbd>shift</kbd> for anticlockwise.</p>
+          <div style="height:14px"></div>
+          <div class="movepad" id="movepad"></div>
+          <div class="hr"></div>
+          <div class="btn-row">
+            <button class="btn sm" id="btnScramble">Scramble</button>
+            <button class="btn sm" id="btnResetSolved">Reset to solved</button>
+          </div>
+          <div style="height:9px"></div>
+          <button class="btn primary" id="btnSolveFree">Solve from here</button>
+          <div style="height:9px"></div>
+          <button class="btn sm" id="btnFreeBack">Back to start</button>
+        </div>
+      </section>
+
+    </aside>
+
+    <!-- ============ STAGE ============ -->
+    <section class="stage">
+      <canvas id="gl"></canvas>
+      <div class="hud">
+        <div class="hud-top">
+          <span class="chip" id="modeChip"><span class="dot live"></span><span id="modeText">Solved</span></span>
+          <span class="chip hidden" id="phaseChip"><span class="dot ok"></span><span id="phaseChipText"></span></span>
+        </div>
+        <div class="hud-bottom">
+          <div class="movecard hidden" id="moveCard">
+            <div class="row1">
+              <div class="glyph" id="moveGlyph">—</div>
+              <svg class="turn-ico" id="turnIco" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+                <path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v5h-5"/>
+              </svg>
+              <div class="say" id="moveSay">Press play to begin</div>
+            </div>
+          </div>
+          <div class="viewbtns">
+            <button class="icobtn" id="btnResetView" title="Reset the view"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg></button>
+            <button class="icobtn" id="btnSpin" aria-pressed="true" title="Idle spin"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3v4"/><circle cx="12" cy="13" r="6"/></svg></button>
+          </div>
+          <div class="tip" id="stageTip">Drag to turn the cube. Scroll or pinch to zoom.</div>
+        </div>
+      </div>
+      <div class="flash" id="flash"><div id="flashText">Solved</div></div>
+    </section>
+
+    <!-- ============ RIGHT RAIL ============ -->
+    <aside class="rail right">
+      <section class="card">
+        <h2>Flat map</h2>
+        <p id="netHelp">All 54 stickers at once. Tap here if rotating is fiddly.</p>
+        <div style="height:12px"></div>
+        <div class="net" id="net"></div>
+        <div class="netkey" id="netkey"></div>
+      </section>
+
+      <section class="card hidden" id="stepsCard">
+        <h2>Eight phases</h2>
+        <p>Tap any turn to jump to the cube exactly as it looks just before that turn.</p>
+        <div style="height:12px"></div>
+        <div id="phaseList"></div>
+      </section>
+
+      <section class="card" id="notationCard">
+        <h2>Reading the notation</h2>
+        <p>A letter names a face: <b>U</b>p, <b>D</b>own, <b>L</b>eft, <b>R</b>ight, <b>F</b>ront, <b>B</b>ack. A bare letter is a quarter turn clockwise as you look straight at that face. An apostrophe reverses it, a 2 means a half turn.</p>
+        <div class="palg" style="margin-top:11px">R &nbsp;=&nbsp; right face, clockwise<br>R' &nbsp;=&nbsp; right face, anticlockwise<br>R2 &nbsp;=&nbsp; right face, half turn</div>
+      </section>
+    </aside>
+
+  </main>
+</div>
+
+<!-- ============ ABOUT ============ -->
+<div class="veil" id="veil">
+  <div class="sheet">
+    <button class="close" id="btnCloseAbout" aria-label="Close">✕</button>
+    <h2>Engine &amp; maths</h2>
+    <p>What is actually running underneath the cube.</p>
+
+    <h3>No libraries</h3>
+    <p>Everything here is in this one file: the 3D renderer, the maths, the solver. Nothing is fetched from a network, so it runs offline and straight off a disk. Faces are culled, depth sorted and flat shaded onto a 2D canvas — and because a cube is built from flat faces, flat shading is not an approximation, it is exact. Only the specular highlight varies across a face, and that is drawn as a two point gradient.</p>
+
+    <h3>One geometry, two views</h3>
+    <p>A cube state is 54 stickers. Every face turn is a permutation of those 54 numbers — but the permutation tables are not typed in by hand. On load, each sticker is given a 3D lattice position and an outward normal, then rotated by an integer rotation matrix, and the resulting index is read back. The animation rotates the same pieces by the same angle about the same axis, so the picture and the logic come from a single source and cannot disagree.</p>
+    <div class="eq">clockwise turn of face f = rotation of −90° about f's outward normal<br>newState[i] = oldState[perm[i]]</div>
+    <p>After each animated turn the 26 pieces are snapped back to identity and re-coloured from the logical state. Because the pieces are geometrically identical, that reset is invisible — and it removes any chance of drift building up over a hundred turns.</p>
+
+    <h3>Is this cube even possible?</h3>
+    <p>Only about one in twelve colourings of a cube can be reached by turning a real one. Three invariants have to hold, and RUBICEzy checks all three before it searches:</p>
+    <div class="eq">Σ corner twists ≡ 0 (mod 3)<br>Σ edge flips ≡ 0 (mod 2)<br>sign(corner permutation) = sign(edge permutation)</div>
+    <ul>
+      <li>Break the first and one corner is twisted in place — impossible without prising a sticker off.</li>
+      <li>Break the second and one edge is flipped in place.</li>
+      <li>Break the third and exactly two pieces have been swapped.</li>
+    </ul>
+    <p>The whole group has order 43,252,003,274,489,856,000, which is <code>8!·3⁷·12!·2¹¹/2</code>: the divisions by 3, 2 and 2 are exactly those three invariants.</p>
+
+    <h3>How the solution is found</h3>
+    <p>Eight phases, in the order a person would learn them.</p>
+    <ul>
+      <li><b>White daisy and cross.</b> Each white edge is placed by iterative-deepening depth-first search over all 18 turns, with a goal test that also demands the previously placed edges stay put. Branching is cut from 18 to about 13.5 by refusing to turn the same face twice in a row and fixing an order for opposite faces.</li>
+      <li><b>First layer corners and middle layer.</b> Deterministic. The cube is examined, one of a handful of named algorithms is chosen, and the algorithm is re-lettered for whichever slot is being filled — <code>F→R→B→L→F</code> — so one written sequence covers all four positions.</li>
+      <li><b>The last layer.</b> Breadth-first search where each edge of the graph is a whole algorithm rather than a single turn, with a visited set. The goal test is <i>"every sticker is home except this specific handful"</i>. That makes the search self-checking: a mistyped algorithm can only make the search slower, never make the answer wrong, because a state that damages the finished layers simply fails the test.</li>
+    </ul>
+    <p>Finally the turn list is reduced (<code>R R'</code> vanishes, <code>R R</code> becomes <code>R2</code>) and replayed against the starting state to confirm it really finishes solved. On load, twelve random scrambles are solved and verified the same way — that is the count in the header.</p>
+    <p>The result is around 100–130 turns. A two-phase optimal solver would use about 20, but those 20 turns cannot be explained, and explaining is the point here. God's number, for the record, is 20 in the half-turn metric.</p>
+
+    <h3>Motion</h3>
+    <p>Dragging builds a rotation quaternion in camera space and pre-multiplies it onto the cube, which is why the cube keeps spinning the way your finger went no matter how it is already oriented. Letting go leaves angular velocity behind, decayed by a constant factor each frame — a spun cube coasts and settles. Turns ease with a cubic that overshoots by about five percent and returns, which reads as the click of a real mechanism.</p>
+    <div class="eq">q ← Δq · q&nbsp;&nbsp;&nbsp;(camera-space pre-multiply)<br>ω ← 0.93·ω&nbsp;&nbsp;&nbsp;(per frame, when not dragging)</div>
+  </div>
+</div>
+
+<script>
+"use strict";
+(function(){
+
+/* ══════════════════════════════════════════════════════════════
+   1.  CUBE MODEL — facelet geometry and generated permutations
+   ══════════════════════════════════════════════════════════════
+   Facelets 0..53 in blocks of nine: U R F D L B.
+   Within a face, index = row*3+col reading as you look at it,
+   with U read back-to-front and D read front-to-back.
+   Colour ids equal face ids, so a solved cube is state[i]=⌊i/9⌋.
+*/
+var FACE_LETTERS = "URFDLB";
+var COLOR_NAME = ["Yellow","Green","Red","White","Blue","Orange"];
+var COLOR_CSS  = ["#ffd21f","#17d47c","#ff3355","#eef3ff","#2f7bff","#ff8a1f"];
+var COLOR_HEX  = [0xffd21f,0x17d47c,0xff3355,0xeef3ff,0x2f7bff,0xff8a1f];
+var FACE_NAME  = ["Up","Right","Front","Down","Left","Back"];
+var EMPTY = 255;
+
+function faceletGeom(f){
+  var face = Math.floor(f/9), i = f%9, r = Math.floor(i/3), c = i%3;
+  switch(face){
+    case 0: return {pos:[c-1, 1, r-1], nrm:[0,1,0]};
+    case 1: return {pos:[1, 1-r, 1-c], nrm:[1,0,0]};
+    case 2: return {pos:[c-1, 1-r, 1], nrm:[0,0,1]};
+    case 3: return {pos:[c-1,-1, 1-r], nrm:[0,-1,0]};
+    case 4: return {pos:[-1, 1-r, c-1], nrm:[-1,0,0]};
+    default:return {pos:[1-c, 1-r,-1], nrm:[0,0,-1]};
+  }
+}
+var FGEOM = [], PN2F = {};
+function pnKey(p,n){ return p[0]+","+p[1]+","+p[2]+"|"+n[0]+","+n[1]+","+n[2]; }
+for(var f=0; f<54; f++){ var g = faceletGeom(f); FGEOM.push(g); PN2F[pnKey(g.pos,g.nrm)] = f; }
+
+/* rotate an integer vector by ±90° about axis 0=x,1=y,2=z (right hand rule) */
+function rotVec(v, ax, s){
+  var x=v[0], y=v[1], z=v[2];
+  if(ax===0) return s>0 ? [x,-z,y] : [x,z,-y];
+  if(ax===1) return s>0 ? [z,y,-x] : [-z,y,x];
+  return s>0 ? [-y,x,z] : [y,-x,z];
+}
+/* [axis, sign] such that "sign·90° about axis" is a clockwise turn of that face */
+var FACE_ROT  = [[1,-1],[0,-1],[2,-1],[1,1],[0,1],[2,1]];
+var LAYER_VAL = [1,1,1,-1,-1,-1];
+var OPP       = [3,4,5,0,1,2];
+
+function buildPerm(face, times){
+  var ax = FACE_ROT[face][0], s = FACE_ROT[face][1], lv = LAYER_VAL[face];
+  var p = new Uint8Array(54), i, t;
+  for(i=0;i<54;i++) p[i] = i;
+  for(i=0;i<54;i++){
+    var G = FGEOM[i];
+    if(G.pos[ax] !== lv) continue;
+    var po = G.pos, nr = G.nrm;
+    for(t=0;t<times;t++){ po = rotVec(po,ax,s); nr = rotVec(nr,ax,s); }
+    p[ PN2F[pnKey(po,nr)] ] = i;
+  }
+  return p;
+}
+
+var MOVE_NAME=[], MOVE_PERM=[], MOVE_FACE=[], MOVE_AMT=[], MOVE_ID={};
+for(var fc=0; fc<6; fc++) for(var tt=1; tt<=3; tt++){
+  var nm = FACE_LETTERS[fc] + (tt===1?"":tt===2?"2":"'");
+  MOVE_ID[nm] = MOVE_NAME.length;
+  MOVE_NAME.push(nm); MOVE_PERM.push(buildPerm(fc,tt)); MOVE_FACE.push(fc); MOVE_AMT.push(tt);
+}
+var NMOVES = 18;
+function invMove(m){ return MOVE_FACE[m]*3 + (2 - (MOVE_AMT[m]-1)); }
+
+var HOME = new Uint8Array(54);
+for(var h=0; h<54; h++) HOME[h] = Math.floor(h/9);
+
+function solvedState(){ return new Uint8Array(HOME); }
+function applyMove(st, m){
+  var p = MOVE_PERM[m], out = new Uint8Array(54);
+  for(var i=0;i<54;i++) out[i] = st[p[i]];
+  return out;
+}
+function applyList(st, list){
+  var s = new Uint8Array(st);
+  for(var i=0;i<list.length;i++) s = applyMove(s, list[i]);
+  return s;
+}
+function isSolved(st){ for(var i=0;i<54;i++) if(st[i]!==HOME[i]) return false; return true; }
+function solvedExcept(st, allow){
+  for(var i=0;i<54;i++) if(st[i]!==HOME[i] && !allow[i]) return false;
+  return true;
+}
+function allowSet(list){ var a = {}; for(var i=0;i<list.length;i++) a[list[i]] = true; return a; }
+
+function parseAlg(s){
+  var parts = s.split(/\s+/), out = [], i;
+  for(i=0;i<parts.length;i++){
+    if(!parts[i]) continue;
+    var id = MOVE_ID[parts[i]];
+    if(id === undefined) throw new Error("bad move: " + parts[i]);
+    out.push(id);
+  }
+  return out;
+}
+/* re-letter an algorithm for a rotated frame: F→R→B→L→F, U and D fixed */
+var YMAP = {U:"U",D:"D",F:"R",R:"B",B:"L",L:"F"};
+function reletter(s, k){
+  var out = s, i;
+  for(i=0;i<k;i++) out = out.replace(/[URFDLB]/g, function(c){ return YMAP[c]; });
+  return out;
+}
+function alg(s, k){ return parseAlg(reletter(s, k||0)); }
+
+/* piece tables (Kociemba ordering: U/D sticker first, then the two sides clockwise) */
+var CORNER_F = [[8,9,20],[6,18,38],[0,36,47],[2,45,11],[29,26,15],[27,44,24],[33,53,42],[35,17,51]];
+var CORNER_C = [[0,1,2],[0,2,4],[0,4,5],[0,5,1],[3,2,1],[3,4,2],[3,5,4],[3,1,5]];
+var EDGE_F   = [[5,10],[7,19],[3,37],[1,46],[32,16],[28,25],[30,43],[34,52],[23,12],[21,41],[50,39],[48,14]];
+var EDGE_C   = [[0,1],[0,2],[0,4],[0,5],[3,1],[3,2],[3,4],[3,5],[2,1],[2,4],[5,4],[5,1]];
+
+function findEdge(st,a,b){
+  for(var e=0;e<12;e++){
+    var x = st[EDGE_F[e][0]], y = st[EDGE_F[e][1]];
+    if(x===a && y===b) return {slot:e, ori:0};
+    if(x===b && y===a) return {slot:e, ori:1};
+  }
+  return null;
+}
+function findCorner(st, cols){
+  var want = cols.slice().sort().join(",");
+  for(var c=0;c<8;c++){
+    var t = [st[CORNER_F[c][0]], st[CORNER_F[c][1]], st[CORNER_F[c][2]]];
+    if(t.slice().sort().join(",") === want) return {slot:c};
+  }
+  return null;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   2.  VALIDATION
+   ══════════════════════════════════════════════════════════════ */
+function permParity(p){
+  var n = p.length, seen = [], par = 0, i, j;
+  for(i=0;i<n;i++) seen.push(false);
+  for(i=0;i<n;i++){
+    if(seen[i]) continue;
+    var len = 0; j = i;
+    while(!seen[j]){ seen[j] = true; j = p[j]; len++; }
+    par ^= (len - 1) & 1;
+  }
+  return par;
+}
+function validate(st){
+  var errs = [], flag = {}, counts = [0,0,0,0,0,0], empty = 0, i, c;
+  for(i=0;i<54;i++){ if(st[i]===EMPTY) empty++; else counts[st[i]]++; }
+  if(empty > 0){
+    errs.push({t:(empty===1?"1 sticker is":empty+" stickers are")+" still blank."});
+    return {ok:false, errs:errs, counts:counts, empty:empty, flag:flag};
+  }
+  for(c=0;c<6;c++) if(counts[c]!==9)
+    errs.push({t:COLOR_NAME[c]+" is used "+counts[c]+" times. Every colour needs exactly nine."});
+  if(errs.length) return {ok:false, errs:errs, counts:counts, empty:0, flag:flag};
+
+  var cPerm = [], ePerm = [], cOri = 0, eOri = 0, used, p, key, piece, t;
+
+  used = {};
+  for(i=0;i<8;i++){
+    t = [st[CORNER_F[i][0]], st[CORNER_F[i][1]], st[CORNER_F[i][2]]];
+    key = t.slice().sort().join(","); piece = -1;
+    for(p=0;p<8;p++) if(CORNER_C[p].slice().sort().join(",") === key) piece = p;
+    if(piece < 0){
+      errs.push({t:"The corner "+t.map(function(x){return COLOR_NAME[x];}).join(" / ")+" is not a real corner of a cube."});
+      CORNER_F[i].forEach(function(x){ flag[x]=1; }); continue;
+    }
+    if(used[piece]){
+      errs.push({t:"Two corners both read "+CORNER_C[piece].map(function(x){return COLOR_NAME[x];}).join(" / ")+"."});
+      CORNER_F[i].forEach(function(x){ flag[x]=1; });
+    }
+    used[piece] = 1; cPerm[i] = piece;
+    var o = 0; for(p=0;p<3;p++) if(t[p]===0 || t[p]===3) o = p;
+    cOri += o;
+  }
+  used = {};
+  for(i=0;i<12;i++){
+    t = [st[EDGE_F[i][0]], st[EDGE_F[i][1]]];
+    key = t.slice().sort().join(","); piece = -1;
+    for(p=0;p<12;p++) if(EDGE_C[p].slice().sort().join(",") === key) piece = p;
+    if(piece < 0){
+      errs.push({t:"The edge "+t.map(function(x){return COLOR_NAME[x];}).join(" / ")+" is not a real edge of a cube."});
+      EDGE_F[i].forEach(function(x){ flag[x]=1; }); continue;
+    }
+    if(used[piece]){
+      errs.push({t:"Two edges both read "+EDGE_C[piece].map(function(x){return COLOR_NAME[x];}).join(" / ")+"."});
+      EDGE_F[i].forEach(function(x){ flag[x]=1; });
+    }
+    used[piece] = 1; ePerm[i] = piece;
+    eOri += (st[EDGE_F[i][0]] === EDGE_C[piece][0]) ? 0 : 1;
+  }
+  if(errs.length) return {ok:false, errs:errs, counts:counts, empty:0, flag:flag};
+
+  if(cOri % 3 !== 0) errs.push({t:"One corner is twisted in place. Rotate its three stickers around."});
+  if(eOri % 2 !== 0) errs.push({t:"One edge is flipped. Swap that edge's two stickers."});
+  if(permParity(cPerm) !== permParity(ePerm)) errs.push({t:"Two pieces are swapped. Check for a pair you read the wrong way round."});
+
+  return {ok:errs.length===0, errs:errs, counts:counts, empty:0, flag:flag};
+}
+
+/* ══════════════════════════════════════════════════════════════
+   3.  SOLVER — beginner's layer by layer
+   ══════════════════════════════════════════════════════════════ */
+var SIDE   = [2,1,5,4];        /* front face of slot k: F R B L        */
+var UCYC   = [5,1,2,4];        /* U-layer order, one U advances by +1  */
+var DC     = [4,7,6,5];        /* bottom corner slot per k             */
+var UC     = [0,3,2,1];        /* top corner slot per k                */
+var MID_F  = [[23,12],[14,48],[50,39],[41,21]];  /* [front,right] facelet of middle slot k */
+var USLOTF = [1,2,4,5];        /* side face touching U edge slot 0..3  */
+var DSLOT  = {1:4, 2:5, 4:6, 5:7};
+
+function uTurn(n){ return n-1; }                 /* 1→U, 2→U2, 3→U'    */
+function idxUC(f){ return UCYC.indexOf(f); }
+
+var RIGHT_INS = "U R U' R' U' F' U F";
+var LEFT_INS  = "U' L' U L U F U' F'";
+
+function daisyOk(st, c){
+  var r = findEdge(st, 3, c);
+  if(!r) return false;
+  if(r.slot < 4) return st[EDGE_F[r.slot][0]] === 3;
+  var ds = DSLOT[c];
+  return r.slot === ds && st[EDGE_F[ds][0]] === 3;
+}
+function crossOk(st){
+  for(var i=0;i<4;i++){ var c = SIDE[i], ds = DSLOT[c];
+    if(st[EDGE_F[ds][0]] !== 3 || st[EDGE_F[ds][1]] !== c) return false; }
+  return true;
+}
+function dCornerOk(st, k){
+  var F = CORNER_F[DC[k]];
+  return st[F[0]]===3 && st[F[1]]===SIDE[k] && st[F[2]]===SIDE[(k+1)%4];
+}
+function midOk(st, k){
+  return st[MID_F[k][0]]===SIDE[k] && st[MID_F[k][1]]===SIDE[(k+1)%4];
+}
+
+/* iterative-deepening DFS over quarter turns */
+function iddfs(start, goal, maxD){
+  if(goal(start)) return [];
+  var buf = [], d;
+  for(d=0; d<=maxD; d++) buf.push(new Uint8Array(54));
+  buf[0].set(start);
+  var path = new Int16Array(maxD), found = null;
+
+  function dfs(depth, limit, prevFace){
+    var cur = buf[depth], m, i;
+    for(m=0; m<NMOVES; m++){
+      var fa = MOVE_FACE[m];
+      if(fa === prevFace) continue;
+      if(prevFace >= 0 && OPP[fa] === prevFace && fa > prevFace) continue;
+      var p = MOVE_PERM[m], nx = buf[depth+1];
+      for(i=0;i<54;i++) nx[i] = cur[p[i]];
+      path[depth] = m;
+      if(depth+1 === limit){ if(goal(nx)){ found = Array.prototype.slice.call(path, 0, limit); return true; } }
+      else if(dfs(depth+1, limit, fa)) return true;
+    }
+    return false;
+  }
+  for(var limit=1; limit<=maxD; limit++){ if(dfs(0, limit, -1)) return found; }
+  return null;
+}
+
+/* breadth-first over whole algorithms, with a visited set */
+function macroBFS(start, macros, goal, maxDepth, nodeCap){
+  function key(s){ return String.fromCharCode.apply(null, s); }
+  if(goal(start)) return [];
+  var frontier = [{s:new Uint8Array(start), path:[]}], seen = {}, nodes = 0, d, i, j, k;
+  seen[key(start)] = 1;
+  for(d=0; d<maxDepth; d++){
+    var next = [];
+    for(i=0;i<frontier.length;i++){
+      for(j=0;j<macros.length;j++){
+        var mv = macros[j], ns = new Uint8Array(frontier[i].s), tmp = new Uint8Array(54);
+        for(k=0;k<mv.length;k++){
+          var p = MOVE_PERM[mv[k]], q;
+          for(q=0;q<54;q++) tmp[q] = ns[p[q]];
+          ns.set(tmp);
+        }
+        nodes++;
+        if(nodes > nodeCap) return null;
+        var kk = key(ns);
+        if(seen[kk]) continue;
+        seen[kk] = 1;
+        var np = frontier[i].path.concat(mv);
+        if(goal(ns)) return np;
+        next.push({s:ns, path:np});
+      }
+    }
+    frontier = next;
+    if(!frontier.length) break;
+  }
+  return null;
+}
+
+/* allowed-mismatch sets for the last-layer goals */
+var U_EDGE_SIDE = [10,19,37,46];
+var U_CORNER_SIDE = [9,20,18,38,36,47,45,11];
+var U_CORNER_TOP = [8,6,0,2];
+var ALLOW_EO = allowSet(U_EDGE_SIDE.concat(U_CORNER_SIDE, U_CORNER_TOP));
+var ALLOW_CO = allowSet(U_EDGE_SIDE.concat(U_CORNER_SIDE));
+var ALLOW_CP = allowSet(U_EDGE_SIDE);
+
+function eoDone(st){
+  for(var s=0;s<4;s++) if(st[EDGE_F[s][0]] !== 0) return false;
+  return solvedExcept(st, ALLOW_EO);
+}
+function coDone(st){
+  for(var k=0;k<4;k++) if(st[CORNER_F[UC[k]][0]] !== 0) return false;
+  return solvedExcept(st, ALLOW_CO);
+}
+function cpDone(st){ return solvedExcept(st, ALLOW_CP); }
+
+var MAC_EO = [alg("U"), alg("U2"), alg("U'"), alg("F R U R' U' F'"), alg("F U R U' R' F'")];
+var MAC_CO = [alg("U"), alg("U2"), alg("U'"), alg("R U R' U R U2 R'"), alg("R U2 R' U' R U' R'")];
+var MAC_CP = [alg("U"), alg("U2"), alg("U'"), alg("R U R' U' R' F R2 U' R' U' R U R' F'")];
+var MAC_EP = [alg("U"), alg("U2"), alg("U'"),
+              alg("R U' R U R U R U' R' U' R2"),
+              alg("R2 U R U R' U' R' U' R' U R'"),
+              alg("R U R' U' R' F R2 U' R' U' R U R' F'")];
+
+function solveCore(state0){
+  var cur = new Uint8Array(state0), phases = [], mv, i, k, seq, p;
+
+  /* ---- phase 1: white daisy on top ---- */
+  mv = []; var done = [];
+  for(i=0;i<4;i++){
+    var c = SIDE[i];
+    var goal = (function(c, done){
+      return function(st){
+        if(!daisyOk(st,c)) return false;
+        for(var j=0;j<done.length;j++) if(!daisyOk(st,done[j])) return false;
+        return true;
+      };
+    })(c, done.slice());
+    p = iddfs(cur, goal, 5);
+    if(!p) return null;
+    cur = applyList(cur, p); mv = mv.concat(p); done.push(c);
+  }
+  phases.push({id:"daisy", moves:mv});
+
+  /* ---- phase 2: drop them into the white cross ---- */
+  mv = [];
+  for(i=0;i<4;i++){
+    var cc = SIDE[i], ds = DSLOT[cc];
+    if(cur[EDGE_F[ds][0]]===3 && cur[EDGE_F[ds][1]]===cc) continue;
+    var r = findEdge(cur, 3, cc);
+    if(!r || r.slot >= 4) return null;
+    var n = (idxUC(cc) - idxUC(USLOTF[r.slot]) + 4) % 4;
+    seq = n ? [uTurn(n)] : [];
+    seq = seq.concat([cc*3 + 1]);
+    cur = applyList(cur, seq); mv = mv.concat(seq);
+  }
+  if(!crossOk(cur)) return null;
+  phases.push({id:"cross", moves:mv});
+
+  /* ---- phase 3: first-layer corners ---- */
+  mv = [];
+  for(var g3=0; g3<90; g3++){
+    k = -1;
+    for(i=0;i<4;i++) if(!dCornerOk(cur,i)){ k = i; break; }
+    if(k < 0) break;
+    var loc = findCorner(cur, [3, SIDE[k], SIDE[(k+1)%4]]);
+    if(!loc) return null;
+    var dj = DC.indexOf(loc.slot), uj = UC.indexOf(loc.slot);
+    if(dj >= 0)                seq = alg("R U R'", dj);
+    else if(uj < 0)            return null;
+    else if(uj !== k)          seq = [uTurn((uj - k + 4) % 4)];
+    else {
+      var CF = CORNER_F[UC[k]];                  /* [top, right, front] */
+      if(cur[CF[0]] === 3)      seq = alg("R U2 R' U' R U R'", k);
+      else if(cur[CF[1]] === 3) seq = alg("R U R'", k);
+      else                      seq = alg("F' U' F", k);
+    }
+    cur = applyList(cur, seq); mv = mv.concat(seq);
+  }
+  for(i=0;i<4;i++) if(!dCornerOk(cur,i)) return null;
+  phases.push({id:"corners", moves:mv});
+
+  /* ---- phase 4: middle layer ---- */
+  mv = [];
+  for(var g4=0; g4<120; g4++){
+    var all = true;
+    for(i=0;i<4;i++) if(!midOk(cur,i)) all = false;
+    if(all) break;
+    seq = null;
+    for(var s=0; s<4 && !seq; s++){
+      var a = cur[EDGE_F[s][0]], b = cur[EDGE_F[s][1]];
+      if(a===0 || a===3 || b===0 || b===3) continue;   /* not a middle edge */
+      var nn = (idxUC(b) - idxUC(USLOTF[s]) + 4) % 4;
+      var kk = SIDE.indexOf(b);
+      if(kk < 0) continue;
+      seq = nn ? [uTurn(nn)] : [];
+      seq = seq.concat(alg(SIDE[(kk+1)%4] === a ? RIGHT_INS : LEFT_INS, kk));
+    }
+    if(!seq){
+      for(i=0;i<4 && !seq;i++) if(!midOk(cur,i)) seq = alg(RIGHT_INS, i);
+    }
+    if(!seq) return null;
+    cur = applyList(cur, seq); mv = mv.concat(seq);
+  }
+  for(i=0;i<4;i++) if(!midOk(cur,i)) return null;
+  phases.push({id:"middle", moves:mv});
+
+  /* ---- phases 5-8: last layer, self-checking macro search ---- */
+  var stages = [
+    {id:"eo", mac:MAC_EO, goal:eoDone, depth:9,  cap:400000},
+    {id:"co", mac:MAC_CO, goal:coDone, depth:10, cap:400000},
+    {id:"cp", mac:MAC_CP, goal:cpDone, depth:12, cap:400000},
+    {id:"ep", mac:MAC_EP, goal:isSolved, depth:12, cap:400000}
+  ];
+  for(i=0;i<stages.length;i++){
+    p = macroBFS(cur, stages[i].mac, stages[i].goal, stages[i].depth, stages[i].cap);
+    if(!p) return null;
+    cur = applyList(cur, p);
+    phases.push({id:stages[i].id, moves:p});
+  }
+  if(!isSolved(cur)) return null;
+  return phases;
+}
+
+/* collapse neighbouring turns of the same face */
+function tighten(list){
+  var arr = list.slice(), changed = true;
+  while(changed){
+    changed = false;
+    var out = [];
+    for(var i=0;i<arr.length;i++){
+      var it = arr[i], last = out.length ? out[out.length-1] : null;
+      if(last && MOVE_FACE[last.m] === MOVE_FACE[it.m]){
+        var t = (MOVE_AMT[last.m] + MOVE_AMT[it.m]) % 4;
+        out.pop(); changed = true;
+        if(t) out.push({m: MOVE_FACE[it.m]*3 + (t-1), phase: last.phase});
+      } else out.push(it);
+    }
+    arr = out;
+  }
+  return arr;
+}
+
+function solveCube(state0){
+  var t0 = (window.performance && performance.now) ? performance.now() : Date.now();
+  for(var attempt=0; attempt<24; attempt++){
+    var prefix = [];
+    if(attempt > 0){
+      var n = attempt < 8 ? 4 : 8;
+      for(var i=0;i<n;i++) prefix.push(Math.floor(Math.random()*NMOVES));
+    }
+    var res = null;
+    try { res = solveCore(applyList(state0, prefix)); } catch(e){ res = null; }
+    if(!res) continue;
+
+    var phases = prefix.length ? [{id:"warmup", moves:prefix}].concat(res) : res;
+    var tagged = [], pi, mi;
+    for(pi=0; pi<phases.length; pi++)
+      for(mi=0; mi<phases[pi].moves.length; mi++)
+        tagged.push({m:phases[pi].moves[mi], phase:phases[pi].id});
+    tagged = tighten(tagged);
+
+    var chk = new Uint8Array(state0);
+    for(i=0;i<tagged.length;i++) chk = applyMove(chk, tagged[i].m);
+    if(!isSolved(chk)) continue;
+
+    var t1 = (window.performance && performance.now) ? performance.now() : Date.now();
+    return {moves:tagged, ms:Math.round(t1-t0), attempts:attempt+1};
+  }
+  return null;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   4.  SELF TEST — solve random scrambles and verify them
+   ══════════════════════════════════════════════════════════════ */
+function randomScramble(n){
+  var out = [], last = -1;
+  for(var i=0;i<n;i++){
+    var m;
+    do { m = Math.floor(Math.random()*NMOVES); } while(MOVE_FACE[m] === last);
+    last = MOVE_FACE[m]; out.push(m);
+  }
+  return out;
+}
+function runSelfTests(total, done){
+  var pass = 0, ran = 0;
+  function chunk(){
+    var t0 = Date.now();
+    while(ran < total && Date.now() - t0 < 22){
+      var st = applyList(solvedState(), randomScramble(26));
+      var r = solveCube(st);
+      if(r){
+        var chk = new Uint8Array(st);
+        for(var i=0;i<r.moves.length;i++) chk = applyMove(chk, r.moves[i].m);
+        if(isSolved(chk)) pass++;
+      }
+      ran++;
+    }
+    if(ran < total) requestAnimationFrame(chunk);
+    else done(pass, total);
+  }
+  requestAnimationFrame(chunk);
+}
+
+/* ══════════════════════════════════════════════════════════════
+   5.  PHASE COPY
+   ══════════════════════════════════════════════════════════════ */
+var PHASE_ORDER = ["warmup","daisy","cross","corners","middle","eo","co","cp","ep"];
+var PHASE = {
+  warmup:{n:"0", t:"Warm-up turns",
+    goal:"A few setup turns before the method proper. Just follow them.", algs:""},
+  daisy:{n:"1", t:"White daisy",
+    goal:"Bring all four white edge pieces to the top face with white pointing straight up, like petals around the yellow centre.",
+    algs:"A white edge sitting in the bottom layer comes up with a half turn of its face. One in the middle layer needs a single turn of a side face into a free top slot."},
+  cross:{n:"2", t:"White cross",
+    goal:"Drop each petal straight down so its other colour lands on the matching centre.",
+    algs:"Line the petal up over its matching centre, then half-turn that face: F2, R2, B2 or L2."},
+  corners:{n:"3", t:"First layer corners",
+    goal:"Fill the four bottom corners so the whole white face is done and the first band of colour matches all the way round.",
+    algs:"White on the right: R U R'\nWhite in front: F' U' F\nWhite on top: R U2 R' U' R U R'"},
+  middle:{n:"4", t:"Middle layer",
+    goal:"Place the four edges that carry no white and no yellow. Two layers finished.",
+    algs:"Insert to the right: U R U' R' U' F' U F\nInsert to the left: U' L' U L U F U' F'"},
+  eo:{n:"5", t:"Yellow cross",
+    goal:"Get a yellow cross on the top face. Only the four top edges matter here — corners come next.",
+    algs:"F R U R' U' F'\nRun it once from a dot, twice from a line or an L."},
+  co:{n:"6", t:"Yellow face",
+    goal:"Turn the whole top face yellow by twisting the four corners into place.",
+    algs:"Sune: R U R' U R U2 R'\nAim it at a corner that already shows yellow on top."},
+  cp:{n:"7", t:"Corner positions",
+    goal:"Slide the top corners to their correct places. Colours on the sides start lining up.",
+    algs:"T-perm: R U R' U' R' F R2 U' R' U' R U R' F'"},
+  ep:{n:"8", t:"Final edges",
+    goal:"Cycle the last three or four edges home. That is the cube.",
+    algs:"U-perm: R U' R U R U R U' R' U' R2"}
+};
+
+/* ══════════════════════════════════════════════════════════════
+   6.  RENDERER — self contained, no libraries, no network
+   ══════════════════════════════════════════════════════════════
+   Quads are culled, depth sorted and flat shaded onto a 2D canvas.
+   A cube is made of flat faces, so flat shading is not an
+   approximation here, it is exactly right: the only thing that
+   varies across one face is the specular highlight, and that is
+   handled with a two point gradient. Canvas 2D is available in
+   every browser, so the page runs offline and from a file:// URL.
+*/
+var canvas = document.getElementById("gl");
+var ctx = canvas.getContext && canvas.getContext("2d");
+if(!ctx){
+  document.querySelector(".stage").innerHTML =
+    '<div style="display:grid;place-items:center;height:100%;padding:30px;text-align:center;color:#ffc4cf">'+
+    '<div><b>This browser cannot draw to a canvas.</b><br>RUBICEzy needs 2D canvas support.</div></div>';
+  return;
+}
+
+/* ---------- quaternions and vectors ---------- */
+function qAxis(ax, ay, az, ang){
+  /* normalise the axis so a sloppy caller can never produce a quaternion
+     that quietly scales every vector it touches */
+  var l = Math.sqrt(ax*ax + ay*ay + az*az);
+  if(l === 0) return {x:0, y:0, z:0, w:1};
+  var h = ang*0.5, s = Math.sin(h)/l;
+  return {x:ax*s, y:ay*s, z:az*s, w:Math.cos(h)};
+}
+function qMul(a, b){          /* apply b first, then a */
+  return {
+    x: a.w*b.x + a.x*b.w + a.y*b.z - a.z*b.y,
+    y: a.w*b.y - a.x*b.z + a.y*b.w + a.z*b.x,
+    z: a.w*b.z + a.x*b.y - a.y*b.x + a.z*b.w,
+    w: a.w*b.w - a.x*b.x - a.y*b.y - a.z*b.z
+  };
+}
+function qNorm(q){
+  var l = Math.sqrt(q.x*q.x + q.y*q.y + q.z*q.z + q.w*q.w) || 1;
+  return {x:q.x/l, y:q.y/l, z:q.z/l, w:q.w/l};
+}
+function qSlerp(a, b, t){
+  var d = a.x*b.x + a.y*b.y + a.z*b.z + a.w*b.w;
+  var bx = b.x, by = b.y, bz = b.z, bw = b.w;
+  if(d < 0){ d = -d; bx = -bx; by = -by; bz = -bz; bw = -bw; }
+  if(d > 0.9995) return qNorm({x:a.x+(bx-a.x)*t, y:a.y+(by-a.y)*t, z:a.z+(bz-a.z)*t, w:a.w+(bw-a.w)*t});
+  var th = Math.acos(d), s = Math.sin(th);
+  var k0 = Math.sin((1-t)*th)/s, k1 = Math.sin(t*th)/s;
+  return {x:a.x*k0+bx*k1, y:a.y*k0+by*k1, z:a.z*k0+bz*k1, w:a.w*k0+bw*k1};
+}
+/* rotate a vector, results land in the scratch trio to keep the frame free of garbage */
+var _rx = 0, _ry = 0, _rz = 0;
+function qRotI(q, vx, vy, vz){
+  var qx = q.x, qy = q.y, qz = q.z, qw = q.w;
+  var ix =  qw*vx + qy*vz - qz*vy;
+  var iy =  qw*vy + qz*vx - qx*vz;
+  var iz =  qw*vz + qx*vy - qy*vx;
+  var iw = -qx*vx - qy*vy - qz*vz;
+  _rx = ix*qw - iw*qx - iy*qz + iz*qy;
+  _ry = iy*qw - iw*qy - iz*qx + ix*qz;
+  _rz = iz*qw - iw*qz - ix*qy + iy*qx;
+}
+var QID = {x:0, y:0, z:0, w:1};
+
+/* ---------- piece geometry ---------- */
+var FACE_N = [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]];
+
+function roundedRect(half, rad, seg){
+  var pts = [], q = half - rad;
+  var cs = [[q,q,0],[-q,q,Math.PI/2],[-q,-q,Math.PI],[q,-q,1.5*Math.PI]];
+  for(var i=0;i<4;i++) for(var s=0;s<=seg;s++){
+    var a = cs[i][2] + (Math.PI/2)*(s/seg);
+    pts.push([cs[i][0] + rad*Math.cos(a), cs[i][1] + rad*Math.sin(a)]);
+  }
+  return pts;
+}
+function outline3(k, half, rad, seg, lift){
+  var n = FACE_N[k];
+  var upx = 0, upy = 1, upz = 0;
+  if(Math.abs(n[1]) > 0.5){ upy = 0; upz = 1; }
+  var ux = upy*n[2] - upz*n[1], uy = upz*n[0] - upx*n[2], uz = upx*n[1] - upy*n[0];
+  var ul = Math.sqrt(ux*ux + uy*uy + uz*uz) || 1; ux/=ul; uy/=ul; uz/=ul;
+  var vx = n[1]*uz - n[2]*uy, vy = n[2]*ux - n[0]*uz, vz = n[0]*uy - n[1]*ux;
+  var pts = roundedRect(half, rad, seg), out = [];
+  for(var i=0;i<pts.length;i++){
+    var a = pts[i][0], b = pts[i][1];
+    out.push(n[0]*lift + ux*a + vx*b, n[1]*lift + uy*a + vy*b, n[2]*lift + uz*a + vz*b);
+  }
+  return out;
+}
+var BODY_LIFT = 0.474, STICK_LIFT = 0.4835;
+var BODY_OUT = [], STICK_OUT = [];
+for(var gk=0; gk<6; gk++){
+  BODY_OUT.push(outline3(gk, 0.474, 0.085, 2, BODY_LIFT));
+  STICK_OUT.push(outline3(gk, 0.405, 0.098, 4, STICK_LIFT));
+}
+
+var cubies = [];
+(function(){
+  for(var x=-1;x<=1;x++) for(var y=-1;y<=1;y++) for(var z=-1;z<=1;z++){
+    if(x===0 && y===0 && z===0) continue;
+    var fl = [];
+    for(var k=0;k<6;k++){
+      var id = PN2F[pnKey([x,y,z], FACE_N[k])];
+      fl.push(id === undefined ? -1 : id);
+    }
+    cubies.push({home:[x,y,z], px:x, py:y, pz:z, q:QID, facelet:fl, from:null});
+  }
+})();
+function isCentre(f){ return f % 9 === 4; }
+
+/* ---------- sticker appearance ---------- */
+var COLOR_RGB = [];
+for(var ci=0; ci<6; ci++){
+  var hx = COLOR_HEX[ci];
+  COLOR_RGB.push([((hx>>16)&255)/255, ((hx>>8)&255)/255, (hx&255)/255]);
+}
+var ICE_RGB = [0.435, 0.941, 1.0];
+var METAL_RGB = [0.60, 0.645, 0.725];
+
+var stkCol   = new Float32Array(54*3);   /* albedo            */
+var stkMetal = new Float32Array(54);     /* 0 plastic, 1 metal */
+var stkEmC   = new Float32Array(54*3);   /* glow colour       */
+var baseEmis = new Float32Array(54);
+var curEmis  = new Float32Array(54);
+
+function refreshStickers(){
+  for(var f=0; f<54; f++){
+    var v = state[f], i3 = f*3, c;
+    if(v === EMPTY){
+      c = METAL_RGB; stkMetal[f] = 1;
+      stkEmC[i3] = ICE_RGB[0]; stkEmC[i3+1] = ICE_RGB[1]; stkEmC[i3+2] = ICE_RGB[2];
+      baseEmis[f] = 0;
+    } else {
+      c = COLOR_RGB[v]; stkMetal[f] = 0.08;
+      stkEmC[i3] = c[0]; stkEmC[i3+1] = c[1]; stkEmC[i3+2] = c[2];
+      baseEmis[f] = 0.14;
+    }
+    stkCol[i3] = c[0]; stkCol[i3+1] = c[1]; stkCol[i3+2] = c[2];
+  }
+  /* the flat map is a second view of the same state, never a copy of it */
+  refreshNet(mode === "paint" ? lastFlag : null);
+}
+function resetCubieTransforms(){
+  for(var i=0;i<cubies.length;i++){
+    var c = cubies[i];
+    c.px = c.home[0]; c.py = c.home[1]; c.pz = c.home[2]; c.q = QID;
+  }
+}
+
+/* ---------- lighting ---------- */
+function nrm3(a){
+  var l = Math.sqrt(a[0]*a[0]+a[1]*a[1]+a[2]*a[2]);
+  return [a[0]/l, a[1]/l, a[2]/l];
+}
+var LIGHTS = [
+  {d:nrm3([-0.40, 0.66, 0.64]), c:[1.00, 0.99, 0.95], i:1.05},
+  {d:nrm3([ 0.72,-0.28, 0.62]), c:[1.00, 0.34, 0.52], i:0.62},
+  {d:nrm3([-0.34, 0.30,-0.89]), c:[0.44, 0.92, 1.00], i:0.90}
+];
+/* what a mirrored ray sees: dark floor, deep horizon, bright soft ceiling */
+var _env = [0,0,0];
+function envAt(ry){
+  var t = ry < -1 ? -1 : ry > 1 ? 1 : ry, a, b, k;
+  if(t < 0){       a = [0.015,0.022,0.040]; b = [0.150,0.190,0.310]; k = (t+1); }
+  else if(t < 0.4){ a = [0.150,0.190,0.310]; b = [0.430,0.560,0.720]; k = t/0.4; }
+  else {            a = [0.430,0.560,0.720]; b = [0.640,0.870,0.980]; k = (t-0.4)/0.6; }
+  _env[0] = a[0]+(b[0]-a[0])*k; _env[1] = a[1]+(b[1]-a[1])*k; _env[2] = a[2]+(b[2]-a[2])*k;
+  return _env;
+}
+function cl255(x){ x = x*255; return x < 0 ? 0 : x > 255 ? 255 : (x|0); }
+
+function shadeStr(nx,ny,nz, px,py,pz, br,bg,bb, m, ks, sh, er,eg,eb, ei){
+  var vl = Math.sqrt(px*px+py*py+pz*pz) || 1;
+  var vx = -px/vl, vy = -py/vl, vz = -pz/vl;          /* toward the eye */
+  var dr=0, dg=0, db=0, sr=0, sg=0, sb=0, i;
+  for(i=0;i<3;i++){
+    var L = LIGHTS[i], d = L.d;
+    var nl = nx*d[0] + ny*d[1] + nz*d[2];
+    if(nl > 0){ dr += L.c[0]*L.i*nl; dg += L.c[1]*L.i*nl; db += L.c[2]*L.i*nl; }
+    var hx = d[0]+vx, hy = d[1]+vy, hz = d[2]+vz;
+    var hl = Math.sqrt(hx*hx+hy*hy+hz*hz) || 1;
+    var nh = (nx*hx + ny*hy + nz*hz)/hl;
+    if(nh > 0){
+      var sp = Math.pow(nh, sh)*L.i;
+      sr += L.c[0]*sp; sg += L.c[1]*sp; sb += L.c[2]*sp;
+    }
+  }
+  var ndv = nx*vx + ny*vy + nz*vz;
+  var e = envAt(2*ndv*ny - vy);
+  var hemi = (ny+1)*0.5;
+  var ar = 0.030 + 0.130*hemi, ag = 0.040 + 0.170*hemi, ab = 0.062 + 0.235*hemi;
+  var pr = br*(ar+dr) + sr*ks,  pg = bg*(ag+dg) + sg*ks,  pb = bb*(ab+db) + sb*ks;
+  var mr = br*(e[0]*1.05 + sr*1.6), mg = bg*(e[1]*1.05 + sg*1.6), mb = bb*(e[2]*1.05 + sb*1.6);
+  var R = pr + (mr-pr)*m + er*ei;
+  var G = pg + (mg-pg)*m + eg*ei;
+  var B = pb + (mb-pb)*m + eb*ei;
+  return "rgb(" + cl255(R) + "," + cl255(G) + "," + cl255(B) + ")";
+}
+
+/* ---------- camera ---------- */
+var W = 0, H = 0, DPR = 1, camZ = 10.2, focal = 700, ccx = 0, ccy = 0;
+var HOME_Q = qMul(qAxis(1,0,0, 0.44), qAxis(0,1,0, -0.62));
+var WQ = HOME_Q;
+var vel = {x:0, y:0}, dragging = false, spinIdle = true;
+var lastPointer = null, pointerDownAt = 0, moved = 0, pinch = null;
+
+function resize(){
+  var st = canvas.parentElement;
+  var w = st.clientWidth, h = st.clientHeight;
+  if(!w || !h) return;
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = Math.round(w*DPR); canvas.height = Math.round(h*DPR);
+  canvas.style.width = w + "px"; canvas.style.height = h + "px";
+  W = w; H = h; ccx = w/2; ccy = h/2;
+  var fov = (w < 560 ? 44 : 37)*Math.PI/180;
+  focal = (Math.min(h, w*1.12)/2)/Math.tan(fov/2);
+}
+window.addEventListener("resize", resize);
+
+function spin(dx, dy){
+  WQ = qNorm(qMul(qMul(qAxis(0,1,0,dx), qAxis(1,0,0,dy)), WQ));
+}
+
+canvas.addEventListener("pointerdown", function(e){
+  if(canvas.setPointerCapture) canvas.setPointerCapture(e.pointerId);
+  dragging = true; moved = 0; pointerDownAt = Date.now();
+  lastPointer = {x:e.clientX, y:e.clientY};
+  vel.x = vel.y = 0;
+  canvas.classList.add("grabbing");
+});
+canvas.addEventListener("pointermove", function(e){
+  if(!dragging){ hoverPick(e); return; }
+  var dx = e.clientX - lastPointer.x, dy = e.clientY - lastPointer.y;
+  lastPointer = {x:e.clientX, y:e.clientY};
+  moved += Math.abs(dx) + Math.abs(dy);
+  var k = 0.0072;
+  spin(dx*k, dy*k);
+  vel.x = dx*k; vel.y = dy*k;
+});
+canvas.addEventListener("pointerup", function(e){
+  dragging = false;
+  canvas.classList.remove("grabbing");
+  if(moved < 7 && Date.now() - pointerDownAt < 500) clickPick(e);
+});
+canvas.addEventListener("pointercancel", function(){ dragging = false; canvas.classList.remove("grabbing"); });
+canvas.addEventListener("pointerleave", function(){ hoverF = -1; });
+canvas.addEventListener("wheel", function(e){
+  e.preventDefault();
+  camZ = Math.max(6.6, Math.min(19, camZ*(1 + e.deltaY*0.0012)));
+}, {passive:false});
+canvas.addEventListener("touchmove", function(e){
+  if(e.touches.length !== 2) return;
+  e.preventDefault();
+  var d = Math.hypot(e.touches[0].clientX - e.touches[1].clientX,
+                     e.touches[0].clientY - e.touches[1].clientY);
+  if(pinch !== null) camZ = Math.max(6.6, Math.min(19, camZ*(pinch/d)));
+  pinch = d;
+}, {passive:false});
+canvas.addEventListener("touchend", function(){ pinch = null; });
+
+/* ---------- quad pool ---------- */
+var pool = [], poolN = 0, list = [], pickRef = new Array(54);
+function getQuad(){
+  if(poolN === pool.length) pool.push({xy:new Float64Array(48), n:0, depth:0, f:-1,
+    nx:0, ny:0, nz:0, ax:0, ay:0, az:0, bx:0, by:0, bz:0});
+  return pool[poolN++];
+}
+function addQuad(out, cq, bx, by, bz, nx, ny, nz, depth, facelet, sc){
+  var np = out.length/3, q = getQuad(), j, half = np >> 1;
+  for(j=0;j<np;j++){
+    qRotI(cq, out[j*3]*sc, out[j*3+1]*sc, out[j*3+2]*sc);
+    var vx = _rx + bx, vy = _ry + by, vz = _rz + bz;
+    var s = focal/(-vz);
+    q.xy[j*2] = ccx + vx*s;
+    q.xy[j*2+1] = ccy - vy*s;
+    if(j === 0){ q.ax = vx; q.ay = vy; q.az = vz; }
+    else if(j === half){ q.bx = vx; q.by = vy; q.bz = vz; }
+  }
+  q.n = np; q.nx = nx; q.ny = ny; q.nz = nz;
+  q.depth = depth; q.f = facelet;
+  list.push(q);
+  if(facelet >= 0) pickRef[facelet] = q;
+  return q;
+}
+
+/* ---------- turn animation ---------- */
+var busy = false, animGen = 0;
+var pivotQ = null, pivotAx = -1, pivotLV = 0;
+function easeBack(t){
+  var c1 = 1.15, c3 = c1 + 1, p = t - 1;
+  return 1 + c3*p*p*p + c1*p*p;
+}
+function animateTurn(m, dur){
+  return new Promise(function(res){
+    if(busy){ res(false); return; }
+    busy = true;
+    var myGen = animGen;
+    var face = MOVE_FACE[m], amt = MOVE_AMT[m];
+    var ax = FACE_ROT[face][0], sg = FACE_ROT[face][1];
+    /* verified identical to MOVE_PERM[m] for all 18 turns */
+    var target = sg*(amt === 3 ? -1 : amt)*Math.PI/2;
+    var a0 = ax === 0 ? 1 : 0, a1 = ax === 1 ? 1 : 0, a2 = ax === 2 ? 1 : 0;
+    pivotAx = ax; pivotLV = LAYER_VAL[face];
+    var t0 = performance.now();
+    function step(){
+      var t = Math.min(1, (performance.now() - t0)/dur);
+      pivotQ = qAxis(a0, a1, a2, target*easeBack(t));
+      if(t < 1) requestAnimationFrame(step);
+      else {
+        pivotQ = null; pivotAx = -1;
+        resetCubieTransforms();
+        /* if the user jumped to another step mid-turn, this turn is void:
+           put the pieces back but leave the authoritative state untouched */
+        if(myGen === animGen) state = applyMove(state, m);
+        refreshStickers();
+        busy = false;
+        res(myGen === animGen);
+      }
+    }
+    step();
+  });
+}
+
+/* ---------- highlight the layer about to turn ---------- */
+var hi = null;
+function setHighlight(m){
+  hi = null;
+  if(m === null || m === undefined) return;
+  var ax = FACE_ROT[MOVE_FACE[m]][0], lv = LAYER_VAL[MOVE_FACE[m]], set = {};
+  for(var f=0; f<54; f++) if(FGEOM[f].pos[ax] === lv) set[f] = 1;
+  hi = set;
+}
+
+/* ---------- picking, against the polygons actually drawn ---------- */
+var hoverF = -1;
+function pointInQuad(q, mx, my){
+  var inside = false, n = q.n, p = q.xy, i, j;
+  for(i=0, j=n-1; i<n; j=i++){
+    var xi = p[i*2], yi = p[i*2+1], xj = p[j*2], yj = p[j*2+1];
+    if(((yi > my) !== (yj > my)) && (mx < (xj-xi)*(my-yi)/(yj-yi) + xi)) inside = !inside;
+  }
+  return inside;
+}
+function pickFacelet(e){
+  var r = canvas.getBoundingClientRect();
+  var mx = e.clientX - r.left, my = e.clientY - r.top;
+  var best = -1, bestD = 1e9;
+  for(var f=0; f<54; f++){
+    var q = pickRef[f];
+    if(!q) continue;
+    if(q.depth < bestD && pointInQuad(q, mx, my)){ bestD = q.depth; best = f; }
+  }
+  return best;
+}
+function hoverPick(e){
+  if(mode !== "paint"){ hoverF = -1; return; }
+  var f = pickFacelet(e);
+  hoverF = (f >= 0 && !isCentre(f)) ? f : -1;
+}
+function clickPick(e){
+  if(mode !== "paint") return;
+  var f = pickFacelet(e);
+  if(f >= 0) paintFacelet(f);
+}
+
+/* ---------- intro flight ---------- */
+var intro = null;
+function startIntro(){
+  for(var i=0;i<cubies.length;i++){
+    var c = cubies[i], h = c.home;
+    var l = Math.sqrt(h[0]*h[0] + h[1]*h[1] + h[2]*h[2]) || 1;
+    var k = 5.5 + Math.random()*4;
+    var ra = Math.random()*Math.PI*2, rb = Math.random()*Math.PI*2;
+    c.from = {
+      x: h[0] + h[0]/l*k, y: h[1] + h[1]/l*k, z: h[2] + h[2]/l*k,
+      q: qNorm(qMul(qAxis(0,1,0,ra), qAxis(1,0,0,rb))),
+      d: Math.random()*0.32
+    };
+  }
+  intro = {t0: performance.now(), dur: 1750, fromQ: qMul(qAxis(0,1,0,-2.6), HOME_Q)};
+}
+function tickIntro(now){
+  if(!intro) return;
+  var g = Math.min(1, (now - intro.t0)/intro.dur);
+  WQ = qSlerp(intro.fromQ, HOME_Q, 1 - Math.pow(1-g, 3));
+  for(var i=0;i<cubies.length;i++){
+    var c = cubies[i], f = c.from;
+    var t = Math.max(0, Math.min(1, (g - f.d)/(1 - f.d)));
+    var e = 1 - Math.pow(1-t, 4);
+    c.px = f.x + (c.home[0] - f.x)*e;
+    c.py = f.y + (c.home[1] - f.y)*e;
+    c.pz = f.z + (c.home[2] - f.z)*e;
+    c.q = qSlerp(f.q, QID, e);
+  }
+  if(g >= 1){ intro = null; resetCubieTransforms(); }
+}
+
+/* ---------- colour drain ---------- */
+var drain = null;
+function startDrain(after){
+  var from = [];
+  for(var i=0;i<54;i++){
+    from.push({c: COLOR_RGB[HOME[i]], d: (2 - FGEOM[i].pos[1])*0.11 + Math.random()*0.09});
+  }
+  drain = {t0: performance.now(), dur: 1100, from: from, after: after};
+}
+function tickDrain(now){
+  if(!drain) return;
+  var g = Math.min(1, (now - drain.t0)/drain.dur);
+  for(var i=0;i<54;i++){
+    var t = Math.max(0, Math.min(1, (g - drain.from[i].d)/0.55));
+    var e = t*t*(3 - 2*t), i3 = i*3, c = drain.from[i].c;
+    stkCol[i3]   = c[0] + (METAL_RGB[0] - c[0])*e;
+    stkCol[i3+1] = c[1] + (METAL_RGB[1] - c[1])*e;
+    stkCol[i3+2] = c[2] + (METAL_RGB[2] - c[2])*e;
+    stkMetal[i] = 0.08 + 0.92*e;
+    var flashK = Math.sin(Math.PI*t);
+    stkEmC[i3]   = c[0] + (1 - c[0])*flashK;
+    stkEmC[i3+1] = c[1] + (1 - c[1])*flashK;
+    stkEmC[i3+2] = c[2] + (1 - c[2])*flashK;
+    baseEmis[i] = 0.14*(1-e) + 0.85*flashK;
+  }
+  if(g >= 1){
+    var cb = drain.after; drain = null;
+    /* the callback swaps in the blank state, so let it run before repainting */
+    if(cb) cb(); else refreshStickers();
+  }
+}
+
+/* ---------- backdrop and motes ---------- */
+var MOTES = (function(){
+  var a = [], i;
+  for(i=0;i<300;i++){
+    var r = 7 + Math.random()*13, th = Math.random()*Math.PI*2, ph = Math.acos(2*Math.random()-1);
+    a.push(r*Math.sin(ph)*Math.cos(th), r*Math.cos(ph)*0.72, r*Math.sin(ph)*Math.sin(th));
+  }
+  return a;
+})();
+function drawBackdrop(){
+  var g = ctx.createRadialGradient(ccx, ccy*0.9, 0, ccx, ccy*0.9, Math.max(W,H)*0.62);
+  g.addColorStop(0, "rgba(30,50,96,0.55)");
+  g.addColorStop(0.42, "rgba(15,22,44,0.26)");
+  g.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+}
+function drawMotes(now){
+  var mq = qMul(qAxis(0,1,0, now*0.00004), WQ), i;
+  for(i=0;i<MOTES.length;i+=3){
+    qRotI(mq, MOTES[i], MOTES[i+1], MOTES[i+2]);
+    var vz = _rz - camZ;
+    if(vz > -1.5) continue;
+    var s = focal/(-vz);
+    var x = ccx + _rx*s, y = ccy - _ry*s;
+    if(x < -4 || x > W+4 || y < -4 || y > H+4) continue;
+    var al = 0.42*Math.max(0.08, 1 - (-vz - 6)/16);
+    ctx.fillStyle = "rgba(150,220,255," + al.toFixed(3) + ")";
+    ctx.fillRect(x, y, 1.7, 1.7);
+  }
+}
+
+/* ---------- draw ---------- */
+function drawQuad(q){
+  var p = q.xy, i;
+  ctx.beginPath();
+  ctx.moveTo(p[0], p[1]);
+  for(i=1;i<q.n;i++) ctx.lineTo(p[i*2], p[i*2+1]);
+  ctx.closePath();
+
+  var br, bg, bb, m, ks, sh, er = 0, eg = 0, eb = 0, ei = 0;
+  if(q.f < 0){ br = 0.070; bg = 0.079; bb = 0.110; m = 0.30; ks = 0.42; sh = 46; }
+  else {
+    var i3 = q.f*3;
+    br = stkCol[i3]; bg = stkCol[i3+1]; bb = stkCol[i3+2];
+    m = stkMetal[q.f]; ks = 0.55; sh = 26 + 70*m;
+    er = stkEmC[i3]; eg = stkEmC[i3+1]; eb = stkEmC[i3+2]; ei = curEmis[q.f];
+  }
+  var cA = shadeStr(q.nx,q.ny,q.nz, q.ax,q.ay,q.az, br,bg,bb, m, ks, sh, er,eg,eb, ei);
+  var cB = shadeStr(q.nx,q.ny,q.nz, q.bx,q.by,q.bz, br,bg,bb, m, ks, sh, er,eg,eb, ei);
+  if(cA === cB) ctx.fillStyle = cA;
+  else {
+    var half = q.n >> 1;
+    var gr = ctx.createLinearGradient(p[0], p[1], p[half*2], p[half*2+1]);
+    gr.addColorStop(0, cA); gr.addColorStop(1, cB);
+    ctx.fillStyle = gr;
+  }
+  if(q.f >= 0 && ei > 0.3){
+    ctx.shadowColor = "rgba(" + cl255(er) + "," + cl255(eg) + "," + cl255(eb) + ",0.9)";
+    ctx.shadowBlur = 20*Math.min(1, ei);
+  }
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  if(q.f >= 0){
+    ctx.strokeStyle = "rgba(0,0,0,0.42)";
+    ctx.lineWidth = 0.9;
+    ctx.stroke();
+  }
+}
+
+function render(now){
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+  drawBackdrop();
+  drawMotes(now);
+
+  poolN = 0; list.length = 0;
+  for(var f=0; f<54; f++) pickRef[f] = null;
+
+  var i, k;
+  for(i=0;i<cubies.length;i++){
+    var cb = cubies[i];
+    var pq = (pivotQ && cb.home[pivotAx] === pivotLV) ? pivotQ : QID;
+    var cq = qMul(WQ, qMul(pq, cb.q));
+    qRotI(pq, cb.px, cb.py, cb.pz);
+    qRotI(WQ, _rx, _ry, _rz);
+    var bx = _rx, by = _ry, bz = _rz - camZ;
+    for(k=0;k<6;k++){
+      var n = FACE_N[k];
+      qRotI(cq, n[0], n[1], n[2]);
+      var nx = _rx, ny = _ry, nz = _rz;
+      var bcx = nx*BODY_LIFT + bx, bcy = ny*BODY_LIFT + by, bcz = nz*BODY_LIFT + bz;
+      if(nx*bcx + ny*bcy + nz*bcz >= 0) continue;          /* facing away */
+      var d = -bcz;
+      var bq = addQuad(BODY_OUT[k], cq, bx, by, bz, nx, ny, nz, d, -1, 1);
+      bq.cb = i; bq.k = k;
+      var fl = cb.facelet[k];
+      if(fl >= 0){
+        var sc = (hoverF === fl) ? 1.09 : 1;
+        /* the sticker's depth is derived from its own body face, not measured
+           independently: near the silhouette a sticker's true centroid can sit
+           marginally further away than the plastic it is stuck to, and then the
+           plastic would paint over it */
+        var sq = addQuad(STICK_OUT[k], cq, bx, by, bz, nx, ny, nz, d - 0.012, fl, sc);
+        sq.cb = i; sq.k = k;
+      }
+    }
+  }
+  list.sort(function(a, b){ return b.depth - a.depth; });
+  for(i=0;i<list.length;i++) drawQuad(list[i]);
+}
+
+function frame(now){
+  requestAnimationFrame(frame);
+  tickIntro(now);
+  tickDrain(now);
+
+  if(!dragging && !intro){
+    if(Math.abs(vel.x) > 0.00004 || Math.abs(vel.y) > 0.00004){
+      spin(vel.x, vel.y); vel.x *= 0.93; vel.y *= 0.93;
+    } else if(spinIdle && !busy){
+      spin(0.0014, 0);
+    }
+  }
+  var pulse = 0.55 + 0.45*Math.sin(now*0.005);
+  for(var f=0; f<54; f++){
+    var e = baseEmis[f];
+    if(hi && hi[f]) e += 0.85*pulse;
+    if(hoverF === f) e += 0.9;
+    curEmis[f] = e;
+  }
+  render(now);
+}
+
+/* ══════════════════════════════════════════════════════════════
+   7.  APP STATE + UI
+   ══════════════════════════════════════════════════════════════ */
+var state = solvedState();
+var mode = "intro";               /* intro | paint | solve | free */
+var selColor = 2;                 /* selected paint colour, -1 = eraser */
+var solution = null, cursor = 0, playing = false, playTimer = null, speed = 6;
+var startState = null;
+
+var $ = function(id){ return document.getElementById(id); };
+var secs = {intro:$("secIntro"), paint:$("secPaint"), solve:$("secSolve"), free:$("secFree")};
+
+/* ---------- flat map ---------- */
+var netCells = new Array(54);
+(function(){
+  var net = $("net");
+  var baseRow = [1,4,4,7,4,4], baseCol = [4,7,4,4,1,10];
+  for(var f=0; f<54; f++){
+    var face = Math.floor(f/9), i = f%9;
+    var d = document.createElement("div");
+    d.className = "cell";
+    d.style.gridRow = (baseRow[face] + Math.floor(i/3));
+    d.style.gridColumn = (baseCol[face] + (i%3));
+    d.setAttribute("data-f", f);
+    if(isCentre(f)) d.classList.add("locked");
+    net.appendChild(d);
+    netCells[f] = d;
+  }
+  net.addEventListener("click", function(e){
+    var t = e.target.closest ? e.target.closest(".cell") : null;
+    if(!t || mode !== "paint") return;
+    paintFacelet(parseInt(t.getAttribute("data-f"), 10));
+  });
+  net.addEventListener("mouseover", function(e){
+    var t = e.target.closest ? e.target.closest(".cell") : null;
+    if(mode !== "paint"){ hoverF = -1; return; }
+    hoverF = (t && !isCentre(parseInt(t.getAttribute("data-f"),10))) ? parseInt(t.getAttribute("data-f"),10) : -1;
+  });
+  net.addEventListener("mouseleave", function(){ hoverF = -1; });
+
+  var key = $("netkey");
+  for(var c=0;c<6;c++){
+    var s = document.createElement("div");
+    s.innerHTML = '<i style="background:'+COLOR_CSS[c]+'"></i>'+FACE_NAME[c]+' · '+COLOR_NAME[c];
+    key.appendChild(s);
+  }
+})();
+
+function refreshNet(flag){
+  for(var f=0; f<54; f++){
+    var d = netCells[f], v = state[f];
+    d.classList.toggle("empty", v === EMPTY);
+    d.classList.toggle("paintable", mode === "paint" && !isCentre(f));
+    d.classList.toggle("flagged", !!(flag && flag[f]));
+    d.style.background = v === EMPTY ? "" : COLOR_CSS[v];
+  }
+}
+
+/* ---------- palette ---------- */
+(function(){
+  var wrap = $("swatches");
+  for(var c=0; c<6; c++){
+    var b = document.createElement("button");
+    b.className = "sw"; b.setAttribute("data-c", c); b.setAttribute("aria-pressed", "false");
+    b.innerHTML = '<span class="puck" style="background:'+COLOR_CSS[c]+'"></span>'+
+                  '<span class="lbl">'+COLOR_NAME[c]+'</span><span class="cnt" data-cnt="'+c+'">8 left</span>';
+    wrap.appendChild(b);
+  }
+  var er = document.createElement("button");
+  er.className = "sw eraser"; er.setAttribute("data-c", "-1"); er.setAttribute("aria-pressed","false");
+  er.innerHTML = '<span class="puck"></span><span class="lbl">Erase</span><span class="cnt">clear</span>';
+  wrap.appendChild(er);
+
+  wrap.addEventListener("click", function(e){
+    var b = e.target.closest ? e.target.closest(".sw") : null;
+    if(!b || b.disabled) return;
+    selColor = parseInt(b.getAttribute("data-c"), 10);
+    refreshPalette();
+  });
+})();
+
+function refreshPalette(){
+  var counts = [0,0,0,0,0,0], placed = 0, f;
+  for(f=0; f<54; f++) if(state[f] !== EMPTY){ counts[state[f]]++; placed++; }
+  var sws = document.querySelectorAll(".sw");
+  for(var i=0;i<sws.length;i++){
+    var c = parseInt(sws[i].getAttribute("data-c"), 10);
+    sws[i].setAttribute("aria-pressed", c === selColor ? "true" : "false");
+    if(c >= 0){
+      var left = 9 - counts[c];
+      sws[i].querySelector(".cnt").textContent = left === 0 ? "done" : left + " left";
+      sws[i].disabled = left === 0;
+      if(left === 0 && selColor === c){ selColor = -2; }
+    }
+  }
+  if(selColor === -2){
+    for(var c2=0;c2<6;c2++) if(counts[c2] < 9){ selColor = c2; break; }
+    if(selColor === -2) selColor = -1;
+    refreshPalette(); return;
+  }
+  $("placedCount").textContent = placed;
+  $("meterFill").style.width = (placed/54*100) + "%";
+  return placed;
+}
+
+function paintFacelet(f){
+  if(isCentre(f)) return;
+  if(selColor === -1){ state[f] = EMPTY; }
+  else {
+    var counts = 0;
+    for(var i=0;i<54;i++) if(state[i] === selColor) counts++;
+    if(state[f] === selColor) return;
+    if(counts >= 9) return;
+    state[f] = selColor;
+  }
+  refreshStickers(); refreshPalette(); checkPaint();
+}
+
+var lastFlag = null;
+function checkPaint(){
+  var v = validate(state);
+  lastFlag = v.flag;
+  refreshNet(v.flag);
+  var ul = $("issues");
+  ul.innerHTML = "";
+  if(v.ok){
+    var li = document.createElement("li");
+    li.className = "good";
+    li.innerHTML = '<span>✓</span><div>This cube is possible. Ready to solve.</div>';
+    ul.appendChild(li);
+  } else {
+    v.errs.slice(0,4).forEach(function(er){
+      var li = document.createElement("li");
+      li.innerHTML = '<span>!</span><div>' + er.t + '</div>';
+      ul.appendChild(li);
+    });
+  }
+  $("btnSolve").disabled = !v.ok;
+  return v.ok;
+}
+
+/* ---------- move pad (free play) ---------- */
+(function(){
+  var pad = $("movepad"), names = ["U","U'","R","R'","F","F'","D","D'","L","L'","B","B'"];
+  names.forEach(function(n){
+    var b = document.createElement("button");
+    b.textContent = n; b.setAttribute("data-m", MOVE_ID[n]);
+    pad.appendChild(b);
+  });
+  pad.addEventListener("click", function(e){
+    if(e.target.tagName !== "BUTTON" || busy) return;
+    animateTurn(parseInt(e.target.getAttribute("data-m"),10), 300/(0.6+speed*0.14));
+  });
+})();
+
+/* ---------- mode switching ---------- */
+function setMode(m){
+  mode = m;
+  ["intro","paint","solve","free"].forEach(function(k){ secs[k].classList.toggle("hidden", k !== m); });
+  $("stepsCard").classList.toggle("hidden", m !== "solve");
+  $("notationCard").classList.toggle("hidden", m === "intro");
+  $("moveCard").classList.toggle("hidden", m !== "solve");
+  $("phaseChip").classList.toggle("hidden", m !== "solve");
+  canvas.classList.toggle("picking", m === "paint");
+  hoverF = -1; hi = null;
+
+  var txt = {intro:"Solved", paint:"Painting", solve:"Solving", free:"Free play"};
+  $("modeText").textContent = txt[m];
+  var tips = {
+    intro:"Drag to turn the cube. Scroll or pinch to zoom.",
+    paint:"Tap a sticker to paint it. Drag empty space to spin the cube.",
+    solve:"Play the turns, or tap any turn on the right to jump there.",
+    free:"Turn faces with the pad or the keyboard: u r f d l b, shift reverses."
+  };
+  $("stageTip").innerHTML = tips[m];
+  $("netHelp").textContent = m === "paint"
+    ? "All 54 stickers at once. Tap here if rotating is fiddly."
+    : "All 54 stickers at once, kept in step with the cube.";
+  refreshNet(mode === "paint" ? lastFlag : null);
+}
+
+/* ---------- start / drain ---------- */
+$("btnStart").addEventListener("click", function(){
+  if(drain) return;
+  startDrain(function(){
+    state = new Uint8Array(54);
+    for(var i=0;i<54;i++) state[i] = isCentre(i) ? HOME[i] : EMPTY;
+    refreshStickers();
+    selColor = 2;
+    setMode("paint");
+    refreshPalette(); checkPaint();
+    flash("Paint it", 900);
+  });
+});
+$("btnBack").addEventListener("click", function(){
+  state = solvedState(); refreshStickers(); setMode("intro");
+});
+$("btnClear").addEventListener("click", function(){
+  for(var i=0;i<54;i++) state[i] = isCentre(i) ? HOME[i] : EMPTY;
+  refreshStickers(); refreshPalette(); checkPaint();
+});
+$("btnFillRandom").addEventListener("click", function(){
+  state = applyList(solvedState(), randomScramble(26));
+  refreshStickers(); refreshPalette(); checkPaint();
+});
+$("btnRandomJump").addEventListener("click", function(){
+  state = applyList(solvedState(), randomScramble(26));
+  refreshStickers();
+  beginSolve();
+});
+$("btnFree").addEventListener("click", function(){
+  state = solvedState(); refreshStickers(); setMode("free");
+});
+$("btnFreeBack").addEventListener("click", function(){
+  state = solvedState(); refreshStickers(); setMode("intro");
+});
+$("btnResetSolved").addEventListener("click", function(){
+  state = solvedState(); resetCubieTransforms(); refreshStickers();
+});
+$("btnScramble").addEventListener("click", function(){
+  if(busy) return;
+  var seq = randomScramble(22), i = 0;
+  (function nextOne(){
+    if(i >= seq.length) return;
+    animateTurn(seq[i++], 130).then(nextOne);
+  })();
+});
+$("btnSolveFree").addEventListener("click", beginSolve);
+$("btnSolve").addEventListener("click", beginSolve);
+$("btnEdit").addEventListener("click", function(){
+  stopPlay();
+  state = new Uint8Array(startState);
+  resetCubieTransforms(); refreshStickers();
+  setMode("paint"); refreshPalette(); checkPaint();
+});
+$("btnRestartAll").addEventListener("click", function(){
+  stopPlay();
+  state = solvedState(); resetCubieTransforms(); refreshStickers();
+  setMode("intro");
+});
+
+/* ---------- solving ---------- */
+function beginSolve(){
+  var v = validate(state);
+  if(!v.ok){ checkPaint(); return; }
+  $("solveHead").textContent = "Working it out…";
+  $("solveSub").textContent = "Searching.";
+  setMode("solve");
+
+  startState = new Uint8Array(state);
+  setTimeout(function(){
+    var r = solveCube(startState);
+    if(!r){
+      $("solveHead").textContent = "No solution found";
+      $("solveSub").textContent = "That should not happen for a legal cube. Try Edit cube, or reload the page.";
+      return;
+    }
+    solution = r; cursor = 0;
+    $("solveHead").textContent = isSolved(startState) ? "Already solved" : "Solution ready";
+    $("solveSub").textContent = r.moves.length + " turns across eight phases. Play them, or step one at a time.";
+    $("statTurns").textContent = r.moves.length;
+    $("statTime").textContent = r.ms + " ms";
+    $("statVerify").textContent = "yes";
+    $("turnTotal").textContent = r.moves.length;
+    buildPhaseList();
+    seek(0);
+    flash(isSolved(startState) ? "Nothing to do" : "Ready", 800);
+  }, 40);
+}
+
+function buildPhaseList(){
+  var wrap = $("phaseList");
+  wrap.innerHTML = "";
+  var groups = [], i;
+  for(i=0;i<solution.moves.length;i++){
+    var it = solution.moves[i];
+    if(!groups.length || groups[groups.length-1].id !== it.phase) groups.push({id:it.phase, from:i, moves:[]});
+    groups[groups.length-1].moves.push(i);
+  }
+  groups.forEach(function(g, gi){
+    var info = PHASE[g.id] || {n:"·", t:g.id, goal:"", algs:""};
+    var sec = document.createElement("div");
+    sec.className = "phase" + (gi === 0 ? " open" : "");
+    sec.setAttribute("data-from", g.from);
+    sec.setAttribute("data-to", g.from + g.moves.length);
+    var chips = g.moves.map(function(mi){
+      return '<button class="mchip" data-i="'+mi+'">'+MOVE_NAME[solution.moves[mi].m]+'</button>';
+    }).join("");
+    sec.innerHTML =
+      '<button class="phead"><span class="pnum">'+info.n+'</span>'+
+      '<span class="ptitle">'+info.t+'</span><span class="pcount">'+g.moves.length+'</span></button>'+
+      '<div class="pbody"><div class="pgoal">'+info.goal+'</div>'+
+      (info.algs ? '<div class="palg">'+info.algs.replace(/\n/g,"<br>")+'</div>' : '')+
+      '<div class="chips">'+chips+'</div></div>';
+    sec.querySelector(".phead").addEventListener("click", function(){ sec.classList.toggle("open"); });
+    wrap.appendChild(sec);
+  });
+}
+/* bound once — rebuilding the list must not stack up duplicate handlers */
+$("phaseList").addEventListener("click", function(e){
+  var b = e.target.closest ? e.target.closest(".mchip") : null;
+  if(!b) return;
+  stopPlay();
+  seek(parseInt(b.getAttribute("data-i"), 10));
+});
+
+function describe(m){
+  var f = MOVE_FACE[m], a = MOVE_AMT[m];
+  var how = a === 1 ? "a quarter turn clockwise" : a === 2 ? "a half turn" : "a quarter turn anticlockwise";
+  return "Turn the <b>" + FACE_NAME[f].toLowerCase() + "</b> face " + how + ", looking straight at it.";
+}
+
+function seek(k){
+  if(!solution) return;
+  animGen++;                          /* voids any turn mid-flight */
+  k = Math.max(0, Math.min(solution.moves.length, k));
+  cursor = k;
+  state = new Uint8Array(startState);
+  for(var i=0;i<k;i++) state = applyMove(state, solution.moves[i].m);
+  resetCubieTransforms(); refreshStickers();
+  syncSolveUI();
+}
+function syncSolveUI(){
+  if(!solution) return;
+  var total = solution.moves.length;
+  $("turnCount").textContent = cursor;
+  $("solveFill").style.width = (total ? cursor/total*100 : 100) + "%";
+
+  var chips = document.querySelectorAll(".mchip");
+  for(var i=0;i<chips.length;i++){
+    var idx = parseInt(chips[i].getAttribute("data-i"), 10);
+    chips[i].classList.toggle("past", idx < cursor);
+    chips[i].classList.toggle("next", idx === cursor);
+  }
+  var phs = document.querySelectorAll(".phase");
+  var activeId = null;
+  for(i=0;i<phs.length;i++){
+    var from = +phs[i].getAttribute("data-from"), to = +phs[i].getAttribute("data-to");
+    var active = cursor >= from && cursor < to;
+    phs[i].classList.toggle("active", active);
+    phs[i].classList.toggle("done", cursor >= to);
+    if(active){ activeId = solution.moves[from].phase; phs[i].classList.add("open"); }
+  }
+  if(cursor < total){
+    var m = solution.moves[cursor].m;
+    $("moveGlyph").textContent = MOVE_NAME[m];
+    $("moveSay").innerHTML = describe(m);
+    setHighlight(m);
+    var info = PHASE[activeId] || {n:"",t:""};
+    $("phaseChipText").textContent = "Phase " + info.n + " · " + info.t;
+    $("phaseChip").classList.remove("hidden");
+  } else {
+    $("moveGlyph").textContent = "✓";
+    $("moveSay").innerHTML = "<b>Solved.</b> Every sticker is home.";
+    setHighlight(null);
+    $("phaseChipText").textContent = "Complete";
+  }
+  var pico = $("btnPlay");
+  pico.innerHTML = playing
+    ? '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>'
+    : '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>';
+  $("btnNext").disabled = cursor >= total;
+  $("btnPrev").disabled = cursor === 0;
+}
+
+function turnDur(){ return 460/(0.5 + speed*0.16); }
+
+function stepNext(){
+  if(!solution || cursor >= solution.moves.length || busy) return Promise.resolve();
+  var m = solution.moves[cursor].m;
+  cursor++;
+  setHighlight(null);
+  return animateTurn(m, turnDur()).then(function(){
+    syncSolveUI();
+    if(cursor >= solution.moves.length){ stopPlay(); flash("Solved", 1600); }
+  });
+}
+function stepPrev(){
+  if(!solution || cursor === 0 || busy) return;
+  cursor--;
+  var m = invMove(solution.moves[cursor].m);
+  setHighlight(null);
+  animateTurn(m, turnDur()).then(syncSolveUI);
+}
+function startPlay(){
+  if(!solution || cursor >= solution.moves.length) return;
+  playing = true; syncSolveUI();
+  (function loop(){
+    if(!playing) return;
+    stepNext().then(function(){
+      if(!playing) return;
+      if(cursor >= solution.moves.length){ stopPlay(); return; }
+      playTimer = setTimeout(loop, Math.max(20, 130 - speed*10));
+    });
+  })();
+}
+function stopPlay(){
+  playing = false;
+  if(playTimer){ clearTimeout(playTimer); playTimer = null; }
+  syncSolveUI();
+}
+$("btnPlay").addEventListener("click", function(){ playing ? stopPlay() : startPlay(); });
+$("btnNext").addEventListener("click", function(){ stopPlay(); stepNext(); });
+$("btnPrev").addEventListener("click", function(){ stopPlay(); stepPrev(); });
+$("btnFirst").addEventListener("click", function(){ stopPlay(); seek(0); });
+$("speed").addEventListener("input", function(e){
+  speed = +e.target.value;
+  $("speedTxt").textContent = (speed/6).toFixed(1) + "×";
+});
+
+/* ---------- view buttons ---------- */
+$("btnResetView").addEventListener("click", function(){
+  WQ = HOME_Q; vel.x = vel.y = 0; camZ = 10.2;
+});
+$("btnSpin").addEventListener("click", function(){
+  spinIdle = !spinIdle;
+  this.setAttribute("aria-pressed", spinIdle ? "true" : "false");
+});
+
+/* ---------- about ---------- */
+$("btnAbout").addEventListener("click", function(){ $("veil").classList.add("on"); });
+$("btnCloseAbout").addEventListener("click", function(){ $("veil").classList.remove("on"); });
+$("veil").addEventListener("click", function(e){ if(e.target === this) this.classList.remove("on"); });
+
+/* ---------- flash ---------- */
+var flashTimer = null;
+function flash(text, ms){
+  $("flashText").textContent = text;
+  $("flash").classList.add("on");
+  if(flashTimer) clearTimeout(flashTimer);
+  flashTimer = setTimeout(function(){ $("flash").classList.remove("on"); }, ms || 1000);
+}
+
+/* ---------- keyboard ---------- */
+document.addEventListener("keydown", function(e){
+  if($("veil").classList.contains("on")){ if(e.key === "Escape") $("veil").classList.remove("on"); return; }
+  if(mode === "solve"){
+    if(e.key === " "){ e.preventDefault(); playing ? stopPlay() : startPlay(); }
+    else if(e.key === "ArrowRight"){ e.preventDefault(); stopPlay(); stepNext(); }
+    else if(e.key === "ArrowLeft"){ e.preventDefault(); stopPlay(); stepPrev(); }
+    else if(e.key === "Home"){ e.preventDefault(); stopPlay(); seek(0); }
+  }
+  if(mode === "free"){
+    var L = e.key.toUpperCase();
+    if("URFDLB".indexOf(L) >= 0 && !busy){
+      e.preventDefault();
+      animateTurn(MOVE_ID[L + (e.shiftKey ? "'" : "")], turnDur());
+    }
+  }
+  if(mode === "paint"){
+    var n = parseInt(e.key, 10);
+    if(n >= 1 && n <= 6){ selColor = n-1; refreshPalette(); }
+    if(e.key === "0" || e.key.toLowerCase() === "e"){ selColor = -1; refreshPalette(); }
+  }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   8.  BOOT
+   ══════════════════════════════════════════════════════════════ */
+resize();
+refreshStickers();
+refreshNet(null);
+setMode("intro");
+startIntro();
+requestAnimationFrame(frame);
+setTimeout(resize, 60);
+
+runSelfTests(12, function(pass, total){
+  var chip = $("engineChip"), dot = chip.querySelector(".dot");
+  dot.className = "dot " + (pass === total ? "ok" : "bad");
+  $("engineText").textContent = pass === total
+    ? "engine verified · " + pass + "/" + total + " scrambles solved"
+    : "engine warning · " + pass + "/" + total + " verified";
+});
+
+})();
+</script>
+</body>
+</html>
